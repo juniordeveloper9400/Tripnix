@@ -29,7 +29,7 @@ app.get(["/admin", "/admin/*"], (req, res) => {
 });
 
 // Health check
-app.get("/", (req, res) => {
+app.get(["/", "/api"], (req, res) => {
   res.json({
     name: "Tripnix API",
     status: "ok",
@@ -49,7 +49,11 @@ app.use((req, res) => {
   res.status(404).json({ error: "Not found" });
 });
 
-app.listen(PORT, () => {
-  console.log(`Tripnix backend running on http://localhost:${PORT}`);
-  console.log(`Tripnix Admin Portal live at http://localhost:${PORT}/admin`);
-});
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`Tripnix backend running on http://localhost:${PORT}`);
+    console.log(`Tripnix Admin Portal live at http://localhost:${PORT}/admin`);
+  });
+}
+
+export default app;

@@ -1,0 +1,9 @@
+{
+  "name": "tripnix-monorepo",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "build": "cd admin && npm install && npm run build",
+    "start": "cd backend && npm start"
+  }
+}
