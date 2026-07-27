@@ -1,4 +1,5 @@
 ﻿import 'package:flutter/material.dart';
+import '../config/app_config.dart';
 import '../models/vehicle.dart';
 import '../models/story.dart';
 import '../services/api_service.dart';
@@ -163,15 +164,15 @@ class _ExploreTabState extends State<_ExploreTab> {
               expandedHeight: 240,
               automaticallyImplyLeading: false,
               backgroundColor: AppColors.black,
-              flexibleSpace: const FlexibleSpaceBar(
+              flexibleSpace: FlexibleSpaceBar(
                 background: BannerCarousel(
                   slides: [
                     BannerSlide(
-                      networkUrl: 'http://localhost:3000/public/onemind.png',
+                      networkUrl: '${AppConfig.publicBase}/onemind.png',
                       assetPath: 'assets/images/onemind.png',
                     ),
                     BannerSlide(
-                      networkUrl: 'http://localhost:3000/public/pompihori.png',
+                      networkUrl: '${AppConfig.publicBase}/pompihori.png',
                       assetPath: 'assets/images/pompihori.png',
                     ),
                   ],

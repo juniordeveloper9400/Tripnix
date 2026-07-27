@@ -1,13 +1,14 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import '../config/app_config.dart';
 import '../models/vehicle.dart';
 import '../models/booking.dart';
 
 class ApiService {
-  // Use localhost for Chrome/Web development.
+  // localhost:3000 during development, same-origin /api once deployed.
   // Can be changed to 10.0.2.2 for Android emulator or customized as needed.
-  static const String baseUrl = 'http://localhost:3000/api';
+  static String get baseUrl => AppConfig.apiBase;
 
   static final ApiService instance = ApiService._init();
   ApiService._init();

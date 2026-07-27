@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "build": "cd admin && npm install && npm run build",
+    "build": "bash scripts/build.sh",
     "start": "node backend/src/index.js"
   },
   "dependencies": {

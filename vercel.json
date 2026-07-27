@@ -1,10 +1,21 @@
 {
-  "buildCommand": "cd admin && npm ci && npm run build",
-  "outputDirectory": "admin/dist",
+  "buildCommand": "bash scripts/build.sh",
+  "outputDirectory": "dist",
+  "redirects": [
+    {
+      "source": "/admin",
+      "destination": "/admin/",
+      "permanent": false
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/(.*)",
       "destination": "/api"
+    },
+    {
+      "source": "/admin/(.*)",
+      "destination": "/admin/index.html"
     },
     {
       "source": "/(.*)",

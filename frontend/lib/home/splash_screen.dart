@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../config/app_config.dart';
 import 'vehicle_showcase_screen.dart';
 
 /// Full white launch screen showing the Tripnix logo, then routes into the app.
@@ -58,7 +59,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
           child: ScaleTransition(
             scale: _scale,
             child: Image.network(
-              'http://localhost:3000/public/tripnix.png',
+              '${AppConfig.publicBase}/tripnix.png',
               width: 200,
               fit: BoxFit.contain,
               errorBuilder: (context, error, stackTrace) => Image.asset(

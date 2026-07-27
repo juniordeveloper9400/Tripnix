@@ -1,6 +1,6 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../config/app_config.dart';
 import 'admin_view_stub.dart' if (dart.library.html) 'admin_view_web.dart';
 
 class AdminScreen extends StatelessWidget {
@@ -8,13 +8,7 @@ class AdminScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Dynamic URL based on current web host or local backend
-    String adminUrl = 'http://localhost:3000/admin';
-    if (kIsWeb) {
-      // Use backend running on port 3000
-      adminUrl = 'http://localhost:3000/admin';
-    }
-
-    return buildAdminView(adminUrl);
+    // localhost:3000/admin in development, /admin/ on the deployed site.
+    return buildAdminView(AppConfig.adminUrl);
   }
 }
