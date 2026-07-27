@@ -2,8 +2,13 @@
   "name": "tripnix-monorepo",
   "private": true,
   "version": "1.0.0",
+  "type": "module",
   "scripts": {
     "build": "cd admin && npm install && npm run build",
-    "start": "cd backend && npm start"
+    "start": "node backend/src/index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
   }
 }
