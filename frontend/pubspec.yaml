@@ -37,11 +37,14 @@ dependencies:
 
   # HTTP client for talking to the Tripnix backend API.
   http: ^1.2.2
+  # MediaType for multipart uploads to R2.
+  http_parser: ^4.1.2
   url_launcher: ^6.3.2
 
   # Keeps the signed-in agency session across app restarts / page reloads.
   shared_preferences: ^2.3.2
   image_picker: ^1.2.3
+  video_player: ^2.11.1
 
 dev_dependencies:
   flutter_test:

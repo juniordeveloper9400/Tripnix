@@ -228,26 +228,18 @@ class _BookingCard extends StatelessWidget {
                   const SizedBox(height: 16),
                   const Divider(height: 1, color: Color(0xFFEEEEEE)),
                   const SizedBox(height: 12),
+                  // No cost shown: the fare is agreed with the agency directly,
+                  // so there is no figure the app could honestly display.
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'TOTAL COST',
-                            style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            '\$${booking.totalCost.toStringAsFixed(0)}',
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w900,
-                              color: AppColors.red,
-                            ),
-                          ),
-                        ],
+                      Text(
+                        '${booking.totalDays} ${booking.totalDays == 1 ? 'day' : 'days'}',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.grey[700],
+                        ),
                       ),
                       if (booking.status == 'Pending' || booking.status == 'Confirmed')
                         TextButton.icon(

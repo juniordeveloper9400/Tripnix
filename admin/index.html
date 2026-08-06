@@ -93,6 +93,10 @@
           <span class="icon">🗺️</span>
           <span class="label">Trips</span>
         </button>
+        <button class="nav-item" data-tab="schedule">
+          <span class="icon">📆</span>
+          <span class="label">Bus Diary</span>
+        </button>
         <button class="nav-item" data-tab="subscription">
           <span class="icon">💳</span>
           <span class="label">Subscription</span>
@@ -311,8 +315,15 @@
                     </div>
                   </div>
                   <div class="form-group">
-                    <label for="trip-image">Trip Image URL</label>
-                    <input type="text" id="trip-image" placeholder="https://… (leave blank to use the vehicle photo)" />
+                    <label for="trip-image">Trip Image</label>
+                    <input type="hidden" id="trip-image" />
+                    <input type="file" id="trip-image-input" accept="image/*" style="display:none;" />
+                    <button type="button" class="btn btn-secondary btn-full" id="trip-image-btn">
+                      🖼️ Choose image from device
+                    </button>
+                    <small id="trip-image-status" style="display:block;margin-top:6px;color:var(--text-muted);font-size:11px;">
+                      Uploaded to Cloudflare R2. Leave empty to use the vehicle photo.
+                    </small>
                     <div class="trip-image-preview" id="trip-image-preview"></div>
                   </div>
                   <div class="form-group">
@@ -351,6 +362,43 @@
         </section>
 
         <!-- TAB 4: Subscription & Plans -->
+        <!-- TAB: Bus Diary — one schedule per vehicle -->
+        <section id="tab-schedule" class="tab-page">
+          <div class="panel-card">
+            <div class="panel-header">
+              <h3>Bus Diary</h3>
+              <span class="panel-header-note">Pick a bus to see everything booked against it</span>
+            </div>
+            <div class="panel-body">
+              <div class="diary-bus-picker" id="diary-bus-picker"></div>
+            </div>
+          </div>
+
+          <div class="dashboard-panels">
+            <div class="panel-card flex-2">
+              <div class="panel-header">
+                <h3 id="diary-vehicle-title">Schedule</h3>
+                <span class="panel-header-note" id="diary-vehicle-sub"></span>
+              </div>
+              <div class="panel-body">
+                <div class="diary-summary" id="diary-summary"></div>
+                <div class="diary-list" id="diary-list"></div>
+              </div>
+            </div>
+
+            <div class="panel-card flex-1">
+              <div class="panel-header"><h3>Booked Dates</h3></div>
+              <div class="panel-body">
+                <div class="diary-calendar" id="diary-calendar"></div>
+                <p class="diary-legend">
+                  <span class="diary-dot is-booked"></span> Booked
+                  <span class="diary-dot is-free"></span> Free
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section id="tab-subscription" class="tab-page">
 
           <!-- Step 1 — Agency platform membership -->
@@ -362,8 +410,9 @@
               <ul class="membership-benefits" id="membership-benefits"></ul>
             </div>
             <div class="membership-side">
-              <span class="membership-price-label">Monthly platform fee</span>
+              <span class="membership-price-label">Platform fee</span>
               <div class="membership-price" id="membership-price">—</div>
+              <div class="platform-plan-options" id="platform-plan-options"></div>
               <span class="badge-status" id="membership-badge">—</span>
 
               <dl class="membership-facts">
@@ -380,8 +429,8 @@
           <!-- Step 2 — Per-vehicle listing fees -->
           <div class="panel-card">
             <div class="panel-header">
-              <h3>Vehicle Subscription Plans</h3>
-              <span class="panel-header-note">One flat monthly fee per vehicle, for every category</span>
+              <h3>Vehicle Listing Plan</h3>
+              <span class="panel-header-note">One flat fee per vehicle — bus, traveller or car</span>
             </div>
             <div class="panel-body">
               <div class="plan-grid" id="plan-grid"></div>
@@ -416,8 +465,12 @@
               <div class="panel-body">
                 <form id="pricing-form">
                   <div class="form-group">
-                    <label for="price-platform">Platform Membership (per month)</label>
+                    <label for="price-platform">Platform Membership <small style="color:var(--text-muted);">(1 month)</small></label>
                     <input type="number" id="price-platform" min="0" step="1" required />
+                  </div>
+                  <div class="form-group">
+                    <label for="price-platform-yearly">Platform Membership <small style="color:var(--text-muted);">(1 year)</small></label>
+                    <input type="number" id="price-platform-yearly" min="0" step="1" required />
                   </div>
                   <div id="tier-price-inputs"></div>
                   <button type="submit" class="btn btn-primary btn-full">💾 Save Pricing</button>
@@ -645,6 +698,7 @@
           <label>🎥 Vehicle Videos (Upload from Gallery / Device)</label>
           <div class="media-dropzone" id="videos-dropzone">
             <input type="file" id="vehicle-videos-input" accept="video/*" multiple style="display:none;" />
+            <small id="media-upload-status" style="display:block;margin-top:6px;color:var(--accent-yellow);font-size:11px;"></small>
             <button type="button" class="btn btn-secondary media-upload-btn" id="upload-videos-btn">
               <span>🎬 Select Videos from Gallery</span>
             </button>

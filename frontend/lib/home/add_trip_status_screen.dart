@@ -124,11 +124,15 @@ class _AddTripStatusScreenState extends State<AddTripStatusScreen> {
       );
       if (file != null) {
         final bytes = await file.readAsBytes();
-        final mimeType = file.mimeType ?? 'image/jpeg';
-        final base64Str = base64Encode(bytes);
-        setState(() {
-          _imageCtrl.text = 'data:$mimeType;base64,$base64Str';
-        });
+        // Uploads to Cloudflare R2 and keeps only the returned URL, so the
+        // trip record stays small instead of carrying the whole image.
+        final url = await ApiService.instance.uploadMedia(
+          bytes: bytes,
+          fileName: file.name,
+          contentType: file.mimeType ?? 'image/jpeg',
+          folder: 'trips',
+        );
+        setState(() => _imageCtrl.text = url);
       }
     } catch (e) {
       if (!mounted) return;
@@ -483,45 +487,7 @@ class _AddTripStatusScreenState extends State<AddTripStatusScreen> {
                           controller: _imageCtrl,
                           decoration: _decoration(
                             Icons.link_rounded,
-                            hint: 'Or paste image URL / pick preset below',
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        const Text(
-                          'Quick Preset Destination Images:',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.black,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        SizedBox(
-                          height: 80,
-                          child: ListView(
-                            scrollDirection: Axis.horizontal,
-                            children: [
-                              _presetChip(
-                                label: 'Ooty Hills',
-                                url: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=800&q=80',
-                              ),
-                              _presetChip(
-                                label: 'Beach Getaway',
-                                url: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=800&q=80',
-                              ),
-                              _presetChip(
-                                label: 'Luxury Coach',
-                                url: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&w=800&q=80',
-                              ),
-                              _presetChip(
-                                label: 'Mountain View',
-                                url: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=800&q=80',
-                              ),
-                              _presetChip(
-                                label: 'Night Highway',
-                                url: 'https://images.unsplash.com/photo-1519003722824-194d4455a60c?auto=format&fit=crop&w=800&q=80',
-                              ),
-                            ],
+                            hint: 'Or paste an image URL',
                           ),
                         ),
                         const SizedBox(height: 18),
@@ -586,83 +552,6 @@ class _AddTripStatusScreenState extends State<AddTripStatusScreen> {
                 ),
               ),
             ),
-    );
-  }
-
-  Widget _presetChip({required String label, required String url}) {
-    final selected = _imageCtrl.text.trim() == url;
-    return Padding(
-      padding: const EdgeInsets.only(right: 10),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () {
-          setState(() {
-            _imageCtrl.text = url;
-          });
-        },
-        child: Container(
-          width: 100,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: selected ? AppColors.red : Colors.grey.shade300,
-              width: selected ? 2.2 : 1,
-            ),
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                Image.network(
-                  url,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) => Container(color: Colors.grey.shade300),
-                ),
-                Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Colors.transparent, Colors.black.withValues(alpha: 0.7)],
-                    ),
-                  ),
-                ),
-                Align(
-                  alignment: Alignment.bottomCenter,
-                  child: Padding(
-                    padding: const EdgeInsets.all(4),
-                    child: Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-                if (selected)
-                  Positioned(
-                    top: 4,
-                    right: 4,
-                    child: Container(
-                      padding: const EdgeInsets.all(2),
-                      decoration: const BoxDecoration(
-                        color: AppColors.red,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.check, color: Colors.white, size: 10),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
-      ),
     );
   }
 

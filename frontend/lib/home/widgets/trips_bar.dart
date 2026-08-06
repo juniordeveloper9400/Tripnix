@@ -344,11 +344,19 @@ class _TripTile extends StatelessWidget {
                 const SizedBox(height: 2),
                 Row(
                   children: [
-                    Icon(Icons.event, size: 11, color: Colors.grey[500]),
+                    Icon(
+                      // An available bus has no dates to show, so name the
+                      // vehicle instead of rendering an empty "→".
+                      trip.isAvailable ? trip.vehicleIcon : Icons.event,
+                      size: 11,
+                      color: Colors.grey[500],
+                    ),
                     const SizedBox(width: 3),
                     Expanded(
                       child: Text(
-                        '${trip.departureLabel} → ${trip.arrivalLabel}',
+                        trip.isAvailable
+                            ? trip.vehicleName
+                            : '${trip.departureLabel} → ${trip.arrivalLabel}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(

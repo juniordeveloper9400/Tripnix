@@ -1,6 +1,7 @@
 import { Router } from "express";
-import { findVehicle } from "./vehicles.js";
+import { findVehicle, allVehicles, refreshVehiclesFromDb } from "./vehicles.js";
 import { isVehiclePubliclyListed } from "./subscriptions.js";
+import { dbRef, databaseConfigured, snapshotToArray } from "../lib/firebase.js";
 
 const router = Router();
 
@@ -10,6 +11,10 @@ let trips = [];
 let nextId = 1;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+function tripsRef() {
+  return databaseConfigured ? dbRef("trips") : null;
+}
 
 /// Midnight today, so a trip departing today counts as running.
 function today() {
@@ -47,8 +52,6 @@ function decorate(trip) {
     ...trip,
     durationDays,
     status: tripStatus(trip),
-    // "Status based on the bus" — whether the vehicle is still subscribed and
-    // therefore visible to travellers.
     busListed: vehicle ? isVehiclePubliclyListed(vehicle) : false,
     vehicleName: vehicle?.name ?? trip.vehicleName,
     vehicleNumber: vehicle?.vehicleNumber ?? trip.vehicleNumber,
@@ -57,9 +60,70 @@ function decorate(trip) {
   };
 }
 
+/// Strips the traveller's contact details off a booking-derived trip.
+///
+/// Anyone can read the public feed and a vehicle's schedule, so those views
+/// show only *that* the bus is taken — never who took it.
+export function redactTrip(trip) {
+  const { customerName, customerPhone, ...rest } = trip;
+  if (trip.kind !== "booking") return rest;
+  return {
+    ...rest,
+    place: "Booked",
+    note: "",
+    isBooked: true
+  };
+}
+
+/// Loads stored trips into this process.
+export async function refreshTripsFromDb() {
+  if (!databaseConfigured) return trips;
+  try {
+    const snap = await tripsRef().get();
+    const stored = snapshotToArray(snap);
+    if (stored.length) {
+      const map = new Map();
+      trips.forEach((t) => map.set(t.id, t));
+      stored.forEach((t) => map.set(t.id, t));
+      trips = Array.from(map.values());
+      trips.forEach((t) => {
+        const value = Number(t.id);
+        if (Number.isFinite(value) && value >= nextId) nextId = value + 1;
+      });
+    }
+  } catch (e) {
+    console.error("Database get trips error:", e);
+  }
+  return trips;
+}
+
+/// Every trip booked against one vehicle, newest departure first.
+export function tripsForVehicle(vehicleId) {
+  return trips
+    .filter((t) => Number(t.vehicleId) === Number(vehicleId))
+    .map(decorate)
+    .sort((a, b) => String(a.departureDate).localeCompare(String(b.departureDate)));
+}
+
 // GET /api/trips (?operatorName=... & ?listed=true)
-router.get("/", (req, res) => {
+router.get("/", async (req, res) => {
   const { operatorName, listed } = req.query;
+
+  if (databaseConfigured) {
+    try {
+      const snap = await tripsRef().get();
+      const stored = snapshotToArray(snap);
+      if (stored.length) {
+        const map = new Map();
+        trips.forEach((t) => map.set(t.id, t));
+        stored.forEach((t) => map.set(t.id, t));
+        trips = Array.from(map.values());
+      }
+    } catch (e) {
+      console.error("Database get trips error:", e);
+    }
+  }
+
   let result = trips.map(decorate);
 
   if (operatorName) {
@@ -68,17 +132,81 @@ router.get("/", (req, res) => {
     );
   }
 
-  // The traveller app asks for listed=true: only trips whose bus is live, and
-  // never trips that have already finished.
   if (listed === "true") {
     result = result.filter((t) => t.busListed && t.status !== "Completed");
   }
 
-  // Soonest departure first.
+  // Only an agency asking for its own trips sees traveller contact details;
+  // the public feed never does.
+  if (!operatorName) {
+    result = result.map(redactTrip);
+  }
+
   result.sort((a, b) =>
     String(a.departureDate).localeCompare(String(b.departureDate))
   );
   res.json(result);
+});
+
+// GET /api/trips/fleet-status
+router.get("/fleet-status", async (req, res) => {
+  // The status bar lists one row per listed vehicle, so the fleet has to be
+  // loaded before the trips are matched against it.
+  await refreshVehiclesFromDb();
+
+  if (databaseConfigured) {
+    try {
+      const snap = await tripsRef().get();
+      const stored = snapshotToArray(snap);
+      if (stored.length) {
+        const map = new Map();
+        trips.forEach((t) => map.set(t.id, t));
+        stored.forEach((t) => map.set(t.id, t));
+        trips = Array.from(map.values());
+      }
+    } catch (e) {
+      console.error("Database get trips for fleet status error:", e);
+    }
+  }
+
+  const rows = allVehicles()
+    .filter(isVehiclePubliclyListed)
+    .map((vehicle) => {
+      const mine = trips
+        .filter((t) => t.vehicleId === vehicle.id)
+        .map(decorate)
+        .filter((t) => t.status !== "Completed")
+        .sort((a, b) => String(a.departureDate).localeCompare(String(b.departureDate)));
+
+      const running = mine.find((t) => t.status === "On Trip");
+      const current = running || mine[0] || null;
+
+      return {
+        id: current ? current.id : -vehicle.id,
+        tripId: current ? current.id : null,
+        operatorName: vehicle.operatorName,
+        vehicleId: vehicle.id,
+        vehicleName: vehicle.name,
+        vehicleNumber: vehicle.vehicleNumber,
+        vehicleType: vehicle.type,
+        seats: vehicle.capacity,
+        place: current ? current.place : "",
+        departureDate: current ? current.departureDate : "",
+        arrivalDate: current ? current.arrivalDate : "",
+        durationDays: current ? current.durationDays : 0,
+        imageUrl: current && current.imageUrl
+          ? current.imageUrl
+          : (vehicle.imageUrls && vehicle.imageUrls[0]) || "",
+        note: current ? current.note : "",
+        status: current ? current.status : "Available",
+        busListed: true
+      };
+    });
+
+  const rank = { "On Trip": 0, Upcoming: 1, Available: 2 };
+  rows.sort((a, b) => (rank[a.status] ?? 3) - (rank[b.status] ?? 3));
+
+  res.json(rows);
 });
 
 // GET /api/trips/:id
@@ -89,7 +217,7 @@ router.get("/:id", (req, res) => {
 });
 
 // POST /api/trips - an agency posts a trip against one of its buses
-router.post("/", (req, res) => {
+router.post("/", async (req, res) => {
   const { operatorName, vehicleId, place, departureDate, arrivalDate, imageUrl, note } =
     req.body;
 
@@ -145,21 +273,91 @@ router.post("/", (req, res) => {
   };
 
   trips.push(trip);
+
+  if (databaseConfigured) {
+    try {
+      await tripsRef().child(String(trip.id)).set(trip);
+    } catch (e) {
+      console.error("Database save trip error:", e);
+    }
+  }
+
   res.status(201).json(decorate(trip));
 });
 
 // DELETE /api/trips/:id
-router.delete("/:id", (req, res) => {
+router.delete("/:id", async (req, res) => {
   const id = Number(req.params.id);
   const exists = trips.some((t) => t.id === id);
   if (!exists) return res.status(404).json({ error: "Trip not found" });
+
   trips = trips.filter((t) => t.id !== id);
+
+  if (databaseConfigured) {
+    try {
+      await tripsRef().child(String(id)).remove();
+    } catch (e) {
+      console.error("Database delete trip error:", e);
+    }
+  }
+
   res.status(204).end();
 });
 
 /// Drops a vehicle's trips when the vehicle itself is deleted.
 export function removeTripsForVehicle(vehicleId) {
   trips = trips.filter((t) => t.vehicleId !== Number(vehicleId));
+}
+
+/// Creates a trip entry when a customer booking is made so it displays on the status bar.
+///
+/// The traveller's name and phone are kept in dedicated fields rather than
+/// baked into `place` / `note`, because those two are shown publicly — putting
+/// them there published one customer's contact details to every other user.
+export function addTripFromBooking(booking, vehicle) {
+  const trip = {
+    id: nextId++,
+    bookingId: booking.id,
+    kind: "booking",
+    operatorName: vehicle.operatorName,
+    vehicleId: vehicle.id,
+    vehicleName: vehicle.name,
+    vehicleNumber: vehicle.vehicleNumber,
+    vehicleType: vehicle.type,
+    place: "Booked",
+    departureDate: String(booking.startDate).trim(),
+    arrivalDate: String(booking.endDate).trim(),
+    imageUrl: (vehicle.imageUrls && vehicle.imageUrls[0]) || "",
+    note: "",
+    customerName: booking.userName,
+    customerPhone: booking.userPhone,
+    createdAt: new Date().toISOString()
+  };
+  trips.push(trip);
+
+  if (databaseConfigured) {
+    try {
+      tripsRef().child(String(trip.id)).set(trip).catch((e) => {
+        console.error("Database save trip from booking error:", e);
+      });
+    } catch (_) {}
+  }
+
+  return decorate(trip);
+}
+
+/// Removes a trip associated with a cancelled/deleted booking.
+export function removeTripForBooking(bookingId) {
+  const found = trips.find((t) => t.bookingId === Number(bookingId));
+  trips = trips.filter((t) => t.bookingId !== Number(bookingId));
+
+  if (found && databaseConfigured) {
+    try {
+      tripsRef().child(String(found.id)).remove().catch((e) => {
+        console.error("Database delete trip for booking error:", e);
+      });
+    } catch (_) {}
+  }
 }
 
 export default router;

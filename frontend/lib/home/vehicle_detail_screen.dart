@@ -5,6 +5,7 @@ import '../models/booking.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
 import 'widgets/agency_contact_sheet.dart';
+import 'widgets/vehicle_media.dart';
 
 class VehicleDetailScreen extends StatefulWidget {
   const VehicleDetailScreen({super.key, required this.vehicle});
@@ -74,17 +75,12 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
                         itemBuilder: (context, index) {
                           final url = vehicle.imageUrls.isNotEmpty
                               ? vehicle.imageUrls[index]
-                              : 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&q=80&w=600';
+                              : null;
                           return Hero(
                             tag: index == 0 ? 'vehicle_image_${vehicle.id}' : 'vehicle_image_${vehicle.id}_$index',
-                            child: Image.network(
-                              url,
-                              fit: BoxFit.cover,
-                              width: double.infinity,
-                              errorBuilder: (context, e, s) => Container(
-                                color: Colors.grey[300],
-                                child: const Icon(Icons.directions_bus, size: 80, color: Colors.grey),
-                              ),
+                            child: VehicleImage(
+                              url: url,
+                              emptyLabel: 'No photos uploaded yet',
                             ),
                           );
                         },
@@ -239,18 +235,21 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 24),
-                    // Interactive Video Player Showcase Widget
-                    const Text(
-                      'Video Tour & Overview',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.black,
+                    // Videos the agency uploaded for this vehicle. The whole
+                    // section disappears when there are none.
+                    if (vehicle.videoUrls.isNotEmpty) ...[
+                      const SizedBox(height: 24),
+                      const Text(
+                        'Video Tour & Overview',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.black,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    _SimulatedVideoPlayer(vehicleName: vehicle.name),
+                      const SizedBox(height: 12),
+                      VehicleVideoGallery(videoUrls: vehicle.videoUrls),
+                    ],
                     const SizedBox(height: 24),
                     // Description
                     const Text(
@@ -543,278 +542,6 @@ class _SpecItem extends StatelessWidget {
   }
 }
 
-// Simulated Video Player Widget with smooth visual interactive feedback
-class _SimulatedVideoPlayer extends StatefulWidget {
-  const _SimulatedVideoPlayer({required this.vehicleName});
-
-  final String vehicleName;
-
-  @override
-  State<_SimulatedVideoPlayer> createState() => _SimulatedVideoPlayerState();
-}
-
-class _SimulatedVideoPlayerState extends State<_SimulatedVideoPlayer> with SingleTickerProviderStateMixin {
-  bool _isPlaying = false;
-  double _progressValue = 0.0;
-  bool _isMuted = false;
-  late AnimationController _progressController;
-  int _seconds = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _progressController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 45), // Mock video length of 45 seconds
-    );
-    _progressController.addListener(() {
-      setState(() {
-        _progressValue = _progressController.value;
-        _seconds = (_progressValue * 45).toInt();
-      });
-      if (_progressController.isCompleted) {
-        setState(() {
-          _isPlaying = false;
-          _progressController.reset();
-        });
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _progressController.dispose();
-    super.dispose();
-  }
-
-  void _togglePlay() {
-    setState(() {
-      _isPlaying = !_isPlaying;
-      if (_isPlaying) {
-        _progressController.forward(from: _progressValue);
-      } else {
-        _progressController.stop();
-      }
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final minLabel = '0:${_seconds.toString().padLeft(2, '0')}';
-    
-    return Container(
-      height: 200,
-      decoration: BoxDecoration(
-        color: Colors.black,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.15),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(
-        children: [
-          // Mock Video Frame Visual Elements
-          Positioned.fill(
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 500),
-              child: _isPlaying
-                  ? Container(
-                      key: ValueKey<int>(_seconds ~/ 5), // cycles through images
-                      decoration: BoxDecoration(
-                        image: DecorationImage(
-                          image: NetworkImage(
-                            _seconds % 10 < 5
-                                ? 'https://images.unsplash.com/photo-1570125909232-eb263c188f7e?auto=format&fit=crop&q=80&w=600'
-                                : 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&q=80&w=600',
-                          ),
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                      child: Container(
-                        color: Colors.black.withValues(alpha: 0.1),
-                        child: Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const SizedBox(
-                                width: 24,
-                                height: 24,
-                                child: CircularProgressIndicator(
-                                  valueColor: AlwaysStoppedAnimation<Color>(AppColors.yellow),
-                                  strokeWidth: 2,
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: Colors.black.withValues(alpha: 0.6),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  'Showing inside of ${widget.vehicleName}...',
-                                  style: const TextStyle(color: Colors.white, fontSize: 12),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    )
-                  : Container(
-                      decoration: const BoxDecoration(
-                        image: DecorationImage(
-                          image: NetworkImage(
-                            'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&q=80&w=600',
-                          ),
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                      child: Container(
-                        color: Colors.black.withValues(alpha: 0.5),
-                        child: Center(
-                          child: CircleAvatar(
-                            radius: 30,
-                            backgroundColor: AppColors.red.withValues(alpha: 0.9),
-                            child: const Icon(Icons.play_arrow, color: Colors.white, size: 36),
-                          ),
-                        ),
-                      ),
-                    ),
-            ),
-          ),
-          // Top Overlays
-          Positioned(
-            top: 12,
-            left: 12,
-            right: 12,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.6),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 6,
-                        height: 6,
-                        decoration: BoxDecoration(
-                          color: _isPlaying ? Colors.green : Colors.grey,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        _isPlaying ? 'PLAYING VIDEO' : 'VIDEO TOUR',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  icon: Icon(
-                    _isMuted ? Icons.volume_off : Icons.volume_up,
-                    color: Colors.white,
-                    size: 20,
-                  ),
-                  onPressed: () {
-                    setState(() => _isMuted = !_isMuted);
-                  },
-                ),
-              ],
-            ),
-          ),
-          // Bottom Control Overlay
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              color: Colors.black.withValues(alpha: 0.6),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        minLabel,
-                        style: const TextStyle(color: Colors.white, fontSize: 10),
-                      ),
-                      Expanded(
-                        child: SliderTheme(
-                          data: SliderTheme.of(context).copyWith(
-                            trackHeight: 3,
-                            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                            activeTrackColor: AppColors.red,
-                            inactiveTrackColor: Colors.white.withValues(alpha: 0.3),
-                            thumbColor: AppColors.red,
-                          ),
-                          child: Slider(
-                            value: _progressValue,
-                            onChanged: (val) {
-                              setState(() {
-                                _progressValue = val;
-                                _seconds = (_progressValue * 45).toInt();
-                                _progressController.value = val;
-                              });
-                            },
-                          ),
-                        ),
-                      ),
-                      const Text(
-                        '0:45',
-                        style: TextStyle(color: Colors.white, fontSize: 10),
-                      ),
-                    ],
-                  ),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      IconButton(
-                        icon: Icon(
-                          _isPlaying ? Icons.pause : Icons.play_arrow,
-                          color: Colors.white,
-                          size: 22,
-                        ),
-                        onPressed: _togglePlay,
-                      ),
-                      const Text(
-                        'HD 1080p',
-                        style: TextStyle(color: Colors.white54, fontSize: 10),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-          // Clicking anywhere on the video area toggles play
-          Positioned.fill(
-            child: InkWell(
-              onTap: _togglePlay,
-              child: const SizedBox(),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 // Booking Sheet details
 class _BookingSheet extends StatefulWidget {
   const _BookingSheet({required this.vehicle});
@@ -846,8 +573,6 @@ class _BookingSheetState extends State<_BookingSheet> {
     final diff = _endDate.difference(_startDate).inDays;
     return diff <= 0 ? 1 : diff;
   }
-
-  double get _totalPrice => widget.vehicle.pricePerDay * _rentalDays;
 
   Future<void> _selectStartDate() async {
     final picked = await showDatePicker(
@@ -892,7 +617,6 @@ class _BookingSheetState extends State<_BookingSheet> {
         userPhone: _phoneCtrl.text.trim(),
         startDate: _startDate,
         endDate: _endDate,
-        totalCost: _totalPrice,
         status: 'Pending',
       );
 
@@ -1086,7 +810,9 @@ class _BookingSheetState extends State<_BookingSheet> {
               ),
               const SizedBox(height: 24),
 
-              // Order Summary Card
+              // Booking summary. No pricing: agencies don't set a rate in the
+              // portal, so any figure here would be invented. Travellers agree
+              // the fare with the agency directly after the request.
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -1098,26 +824,23 @@ class _BookingSheetState extends State<_BookingSheet> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('Rate per day', style: TextStyle(color: Colors.grey[700], fontSize: 14)),
-                        Text('\$${widget.vehicle.pricePerDay.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
                         Text('Total rental period', style: TextStyle(color: Colors.grey[700], fontSize: 14)),
-                        Text('$_rentalDays Days', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        Text(
+                          '$_rentalDays ${_rentalDays == 1 ? 'Day' : 'Days'}',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
                       ],
                     ),
-                    const Divider(height: 24),
+                    const SizedBox(height: 10),
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text('Estimated Cost', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: AppColors.black)),
-                        Text(
-                          '\$${_totalPrice.toStringAsFixed(2)}',
-                          style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 20, color: AppColors.red),
+                        Icon(Icons.info_outline, size: 15, color: Colors.grey[600]),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'The agency will contact you with the fare and confirm availability.',
+                            style: TextStyle(fontSize: 12, color: Colors.grey[600], height: 1.35),
+                          ),
                         ),
                       ],
                     ),

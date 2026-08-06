@@ -106,13 +106,16 @@ class _TripDetailSheet extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Destination leads — it is what the trip is about.
                   Row(
                     children: [
-                      const Icon(Icons.business_center, color: AppColors.red, size: 20),
+                      const Icon(Icons.place, color: AppColors.red, size: 22),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
-                          trip.operatorName.isNotEmpty ? trip.operatorName : trip.place,
+                          trip.isAvailable
+                              ? 'No trip scheduled'
+                              : trip.place,
                           style: const TextStyle(
                             fontSize: 21,
                             fontWeight: FontWeight.w900,
@@ -125,61 +128,102 @@ class _TripDetailSheet extends StatelessWidget {
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      Icon(Icons.place_outlined, size: 14, color: Colors.grey[600]),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Destination: ${trip.place}',
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.grey[600]),
+                      Icon(Icons.storefront,
+                          size: 14, color: Colors.grey[600]),
+                      const SizedBox(width: 5),
+                      Expanded(
+                        child: Text(
+                          trip.operatorName,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey[600],
+                          ),
+                        ),
                       ),
                     ],
                   ),
-                  if (trip.note.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      trip.note,
-                      style: const TextStyle(fontSize: 13.5, height: 1.5),
-                    ),
-                  ],
                   const SizedBox(height: 20),
 
-                  // Start date / End date window
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _DateBlock(
-                          icon: Icons.calendar_month,
-                          label: 'Start Date',
-                          value: trip.departureLabel,
-                        ),
+                  // The same details the agency filled in on Add Trip Status.
+                  if (!trip.isAvailable) ...[
+                    const _SectionLabel('Trip Details'),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: AppColors.background,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.grey.shade200),
                       ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: Column(
-                          children: [
-                            Icon(Icons.arrow_forward,
-                                size: 18, color: Colors.grey[400]),
-                            const SizedBox(height: 2),
-                            Text(
-                              '${trip.durationDays}d',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.grey[500],
-                              ),
+                      child: Column(
+                        children: [
+                          _DetailRow(
+                            icon: Icons.place_outlined,
+                            label: 'Destination',
+                            value: trip.place,
+                          ),
+                          const _RowDivider(),
+                          _DetailRow(
+                            icon: Icons.calendar_month,
+                            label: 'Start Date',
+                            value: trip.departureFull,
+                          ),
+                          const _RowDivider(),
+                          _DetailRow(
+                            icon: Icons.event_available,
+                            label: 'End Date',
+                            value: trip.arrivalFull,
+                          ),
+                          const _RowDivider(),
+                          _DetailRow(
+                            icon: Icons.schedule,
+                            label: 'Duration',
+                            value:
+                                '${trip.durationDays} day${trip.durationDays == 1 ? '' : 's'}',
+                          ),
+                          if (trip.note.isNotEmpty) ...[
+                            const _RowDivider(),
+                            _DetailRow(
+                              icon: Icons.notes,
+                              label: 'Note',
+                              value: trip.note,
                             ),
                           ],
-                        ),
+                        ],
                       ),
-                      Expanded(
-                        child: _DateBlock(
-                          icon: Icons.event_available,
-                          label: 'End Date',
-                          value: trip.arrivalLabel,
-                        ),
+                    ),
+                    const SizedBox(height: 20),
+                  ] else ...[
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(14),
+                        border:
+                            Border.all(color: Colors.blue.withValues(alpha: 0.3)),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
+                      child: Row(
+                        children: [
+                          Icon(Icons.event_available,
+                              size: 18, color: Colors.blue.shade700),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'This bus has no trip on the books — it is free to book.',
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                height: 1.45,
+                                color: Colors.blue.shade900,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                  ],
+
+                  const _SectionLabel('Bus'),
 
                   // The bus this trip runs on
                   Container(
@@ -273,8 +317,27 @@ class _TripDetailSheet extends StatelessWidget {
       );
 }
 
-class _DateBlock extends StatelessWidget {
-  const _DateBlock({
+/// Small heading above each block of the detail sheet.
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(
+        text,
+        style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w800),
+      ),
+    );
+  }
+}
+
+/// One labelled field, mirroring what the agency typed on Add Trip Status.
+class _DetailRow extends StatelessWidget {
+  const _DetailRow({
     required this.icon,
     required this.label,
     required this.value,
@@ -286,36 +349,46 @@ class _DateBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
-      decoration: BoxDecoration(
-        color: AppColors.background,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade200),
-      ),
-      child: Column(
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 18, color: AppColors.red),
-          const SizedBox(height: 6),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 10.5,
-              fontWeight: FontWeight.w600,
-              color: Colors.grey[600],
+          Icon(icon, size: 17, color: AppColors.red),
+          const SizedBox(width: 12),
+          SizedBox(
+            width: 88,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey[600],
+              ),
             ),
           ),
-          const SizedBox(height: 3),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w900,
-              color: AppColors.black,
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontSize: 13.5,
+                fontWeight: FontWeight.w700,
+                color: AppColors.black,
+                height: 1.35,
+              ),
             ),
           ),
         ],
       ),
     );
+  }
+}
+
+class _RowDivider extends StatelessWidget {
+  const _RowDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return Divider(height: 1, thickness: 1, color: Colors.grey.shade200);
   }
 }

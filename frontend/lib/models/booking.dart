@@ -6,7 +6,6 @@ class Booking {
   final String userPhone;
   final DateTime startDate;
   final DateTime endDate;
-  final double totalCost;
   final String status; // 'Pending', 'Confirmed', 'Cancelled'
 
   const Booking({
@@ -17,7 +16,6 @@ class Booking {
     required this.userPhone,
     required this.startDate,
     required this.endDate,
-    required this.totalCost,
     required this.status,
   });
 
@@ -30,7 +28,6 @@ class Booking {
       userPhone: json['userPhone'] as String,
       startDate: DateTime.parse(json['startDate'] as String),
       endDate: DateTime.parse(json['endDate'] as String),
-      totalCost: (json['totalCost'] as num).toDouble(),
       status: json['status'] as String? ?? "Pending",
     );
   }
@@ -44,7 +41,6 @@ class Booking {
       'userPhone': userPhone,
       'startDate': startDate.toIso8601String().split('T')[0],
       'endDate': endDate.toIso8601String().split('T')[0],
-      'totalCost': totalCost,
       'status': status,
     };
   }

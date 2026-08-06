@@ -17,7 +17,9 @@ let state = {
   searchQuery: '',
   editingVehicleId: null,
   vehicleFormImages: [],
-  vehicleFormVideos: []
+  vehicleFormVideos: [],
+  diaryVehicleId: null,  // which bus the diary is showing
+  diary: null            // that bus's schedule from the API
 };
 
 // ─── DOM Refs ─────────────────────────────────────────────
@@ -243,6 +245,7 @@ function switchTab(tabId) {
     fleet:     ['Fleet Management',       'Add buses, edit details, and post available dates'],
     bookings:  ['Customer Bookings',      'Review and manage booking requests'],
     trips:     ['Trips',                  'Post trips that appear in the traveller app story bar'],
+    schedule:  ['Bus Diary',              'The running schedule for each bus in your fleet'],
     subscription: ['Subscription & Plans', 'Platform membership and per-vehicle listing fees'],
     admins:    ['Manage Travel Owners',   'Create and manage Travel Owner login credentials']
   };
@@ -255,6 +258,7 @@ function switchTab(tabId) {
   if (tabId === 'admins') loadAdmins();
   if (tabId === 'subscription') loadSubscription();
   if (tabId === 'trips') loadTrips();
+  if (tabId === 'schedule') loadDiary();
 }
 
 // ─── Event Listeners ───────────────────────────────────────
@@ -316,7 +320,10 @@ function setupEventListeners() {
 
   document.getElementById('pricing-form')?.addEventListener('submit', handlePricingSubmit);
   document.getElementById('trip-form')?.addEventListener('submit', handleTripSubmit);
-  document.getElementById('trip-image')?.addEventListener('input', renderTripImagePreview);
+  document.getElementById('trip-image-btn')?.addEventListener('click', () => {
+    document.getElementById('trip-image-input')?.click();
+  });
+  document.getElementById('trip-image-input')?.addEventListener('change', handleTripImageSelect);
 
   setupCustomTypeDropdown();
 }
@@ -390,44 +397,121 @@ function closeCustomTypeDropdown() {
   menu?.classList.add('hidden');
 }
 
-function handleImageFilesSelect(e) {
+/// Uploads a file to Cloudflare R2 and returns its URL.
+///
+/// Small files go straight through the API. Anything over the serverless body
+/// limit is presigned so the browser PUTs it to R2 directly.
+async function uploadToR2(file, folder) {
+  let cfg;
+  try {
+    const cfgRes = await fetch(`${API_BASE}/uploads/config`);
+    cfg = await cfgRes.json();
+  } catch {
+    throw new Error(
+      `Could not reach the API at ${API_BASE}. Is the backend server running?`
+    );
+  }
+
+  if (!cfg.configured) {
+    throw new Error('R2 storage is not configured on the server yet.');
+  }
+
+  const limit = cfg.maxDirectUploadBytes || 4194304;
+
+  if (file.size <= limit) {
+    const form = new FormData();
+    form.append('files', file);
+
+    let res;
+    try {
+      res = await fetch(`${API_BASE}/uploads?folder=${encodeURIComponent(folder)}`, {
+        method: 'POST',
+        body: form
+      });
+    } catch {
+      throw new Error(
+        `Upload of "${file.name}" (${formatBytes(file.size)}) was cut off before it finished. ` +
+        `Check that the backend is still running, then try again.`
+      );
+    }
+
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.error || `Upload failed (${res.status})`);
+    return data.urls[0];
+  }
+
+  // Bigger than the server will accept in one request, so the browser has to
+  // PUT it to R2 itself using a presigned URL.
+  const presignRes = await fetch(`${API_BASE}/uploads/presign`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fileName: file.name, contentType: file.type, folder })
+  });
+  const presign = await presignRes.json().catch(() => null);
+  if (!presignRes.ok) throw new Error(presign?.error || 'Could not presign upload');
+
+  let put;
+  try {
+    put = await fetch(presign.uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': file.type },
+      body: file
+    });
+  } catch {
+    // A blocked CORS preflight rejects fetch outright, so the response-status
+    // check below never runs — this is where that failure actually surfaces.
+    throw new Error(
+      `"${file.name}" is ${formatBytes(file.size)}, above this server's ` +
+      `${formatBytes(limit)} direct-upload limit, so the browser must send it to ` +
+      `Cloudflare R2 itself — and R2 refused the connection.\n\n` +
+      `Add ${window.location.origin} to the bucket's CORS policy in the Cloudflare ` +
+      `dashboard (R2 → tripnix → Settings → CORS), or upload a smaller file.`
+    );
+  }
+
+  if (!put.ok) {
+    throw new Error(`Direct upload to R2 failed (${put.status}).`);
+  }
+  return presign.url;
+}
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes)) return '—';
+  if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+async function uploadMediaFiles(e, folder, target) {
   const files = Array.from(e.target.files || []);
   if (!files.length) return;
-  let count = 0;
-  files.forEach(file => {
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      if (evt.target?.result) {
-        state.vehicleFormImages.push(evt.target.result);
-      }
-      count++;
-      if (count === files.length) {
-        renderMediaPreviews();
-        e.target.value = '';
-      }
-    };
-    reader.readAsDataURL(file);
-  });
+
+  const label = document.getElementById('media-upload-status');
+  const setStatus = (text) => { if (label) label.textContent = text; };
+
+  try {
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      // Videos are large enough that a bare "Uploading…" looks like a hang.
+      setStatus(`Uploading ${i + 1} of ${files.length} — ${file.name} (${formatBytes(file.size)})…`);
+      const url = await uploadToR2(file, folder);
+      state[target].push(url);
+      renderMediaPreviews();
+    }
+    setStatus('');
+  } catch (err) {
+    setStatus('');
+    alert('❌ ' + err.message);
+  } finally {
+    e.target.value = '';
+  }
+}
+
+function handleImageFilesSelect(e) {
+  return uploadMediaFiles(e, 'vehicles/images', 'vehicleFormImages');
 }
 
 function handleVideoFilesSelect(e) {
-  const files = Array.from(e.target.files || []);
-  if (!files.length) return;
-  let count = 0;
-  files.forEach(file => {
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      if (evt.target?.result) {
-        state.vehicleFormVideos.push(evt.target.result);
-      }
-      count++;
-      if (count === files.length) {
-        renderMediaPreviews();
-        e.target.value = '';
-      }
-    };
-    reader.readAsDataURL(file);
-  });
+  return uploadMediaFiles(e, 'vehicles/videos', 'vehicleFormVideos');
 }
 
 function renderMediaPreviews() {
@@ -501,6 +585,176 @@ async function loadData() {
 }
 
 // ─── Trips (story bar in the traveller app) ────────────────
+// ─── Bus Diary ─────────────────────────────────────────────
+
+/// The diary shows one bus at a time. With a single bus it opens straight on
+/// it; with several the agency picks, which is the point of the picker.
+async function loadDiary() {
+  await loadData();
+
+  const fleet = state.vehicles;
+  if (!fleet.length) {
+    state.diaryVehicleId = null;
+    state.diary = null;
+    renderDiary();
+    return;
+  }
+
+  const stillExists = fleet.some(v => v.id === state.diaryVehicleId);
+  if (!stillExists) state.diaryVehicleId = fleet[0].id;
+
+  await loadDiaryFor(state.diaryVehicleId);
+}
+
+async function loadDiaryFor(vehicleId) {
+  state.diaryVehicleId = vehicleId;
+  renderDiaryBusPicker();
+
+  const listEl = document.getElementById('diary-list');
+  if (listEl) listEl.innerHTML = '<p class="diary-empty">Loading schedule…</p>';
+
+  try {
+    const operator = state.currentUser?.operatorName || '';
+    const res = await fetch(
+      `${API_BASE}/vehicles/${vehicleId}/schedule?operatorName=${encodeURIComponent(operator)}`
+    );
+    if (!res.ok) throw new Error('Could not load the schedule');
+    state.diary = await res.json();
+  } catch (err) {
+    state.diary = null;
+    if (listEl) listEl.innerHTML = `<p class="diary-empty">❌ ${escapeHtml(err.message)}</p>`;
+    return;
+  }
+
+  renderDiary();
+}
+window.loadDiaryFor = loadDiaryFor;
+
+function renderDiary() {
+  renderDiaryBusPicker();
+  renderDiaryHeader();
+  renderDiaryList();
+  renderDiaryCalendar();
+}
+
+function renderDiaryBusPicker() {
+  const box = document.getElementById('diary-bus-picker');
+  if (!box) return;
+
+  if (!state.vehicles.length) {
+    box.innerHTML = '<p class="diary-empty">Add a bus to your fleet first — its diary appears here.</p>';
+    return;
+  }
+
+  box.innerHTML = state.vehicles.map(v => `
+    <button class="diary-bus${v.id === state.diaryVehicleId ? ' is-active' : ''}"
+            onclick="loadDiaryFor(${v.id})">
+      <span class="diary-bus-name">${escapeHtml(v.name)}</span>
+      <span class="diary-bus-number">${escapeHtml(v.vehicleNumber || '—')}</span>
+    </button>`).join('');
+}
+
+function renderDiaryHeader() {
+  const title = document.getElementById('diary-vehicle-title');
+  const sub   = document.getElementById('diary-vehicle-sub');
+  const d = state.diary;
+  if (!title || !sub) return;
+
+  if (!d) {
+    title.textContent = 'Schedule';
+    sub.textContent = '';
+    return;
+  }
+  title.textContent = `${d.vehicleName} · ${d.vehicleNumber || '—'}`;
+  sub.textContent = `${d.vehicleType} · ${d.seats} seats`;
+}
+
+function renderDiaryList() {
+  const el = document.getElementById('diary-list');
+  const summary = document.getElementById('diary-summary');
+  if (!el) return;
+
+  const d = state.diary;
+  if (!d) { el.innerHTML = ''; if (summary) summary.innerHTML = ''; return; }
+
+  const upcoming = d.entries.filter(e => e.status !== 'Completed');
+
+  if (summary) {
+    summary.innerHTML = `
+      <div class="diary-stat"><strong>${upcoming.length}</strong><span>Scheduled</span></div>
+      <div class="diary-stat"><strong>${d.bookedDates.length}</strong><span>Days booked</span></div>
+      <div class="diary-stat"><strong>${d.entries.filter(e => e.kind === 'booking').length}</strong><span>From bookings</span></div>`;
+  }
+
+  if (!d.entries.length) {
+    el.innerHTML = '<p class="diary-empty">Nothing scheduled for this bus yet. Post a trip from the Trips tab, or wait for a customer booking.</p>';
+    return;
+  }
+
+  el.innerHTML = d.entries.map(e => {
+    const statusClass = e.status === 'On Trip' ? 'confirmed'
+      : e.status === 'Completed' ? 'cancelled' : 'pending';
+
+    // Booking entries carry the traveller's details; agency-posted trips carry
+    // a destination and note instead.
+    const who = e.kind === 'booking'
+      ? `<div class="diary-row-who">👤 ${escapeHtml(e.customerName || 'Customer')}${e.customerPhone ? ` · <a href="tel:${escapeHtml(e.customerPhone)}">${escapeHtml(e.customerPhone)}</a>` : ''}</div>`
+      : (e.note ? `<div class="diary-row-who">${escapeHtml(e.note)}</div>` : '');
+
+    return `
+      <div class="diary-row">
+        <div class="diary-row-dates">
+          <strong>${formatDate(e.departureDate)}</strong>
+          <span>→ ${formatDate(e.arrivalDate)}</span>
+          <small>${e.durationDays} day${e.durationDays === 1 ? '' : 's'}</small>
+        </div>
+        <div class="diary-row-main">
+          <div class="diary-row-place">
+            ${e.kind === 'booking' ? '📑 Customer booking' : '🗺️ ' + escapeHtml(e.place || 'Trip')}
+          </div>
+          ${who}
+        </div>
+        <div class="diary-row-status">
+          <span class="badge-status ${statusClass}">${escapeHtml(e.status)}</span>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+/// A month grid for the current and next month, with taken days marked.
+function renderDiaryCalendar() {
+  const el = document.getElementById('diary-calendar');
+  if (!el) return;
+
+  const d = state.diary;
+  if (!d) { el.innerHTML = ''; return; }
+
+  const booked = new Set(d.bookedDates);
+  const today = new Date();
+  const months = [0, 1].map(offset => new Date(today.getFullYear(), today.getMonth() + offset, 1));
+
+  el.innerHTML = months.map(first => {
+    const label = first.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    const daysInMonth = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+    // Monday-first grid.
+    const lead = (first.getDay() + 6) % 7;
+
+    const cells = [];
+    for (let i = 0; i < lead; i++) cells.push('<span class="diary-day is-blank"></span>');
+    for (let day = 1; day <= daysInMonth; day++) {
+      const iso = `${first.getFullYear()}-${String(first.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      cells.push(`<span class="diary-day${booked.has(iso) ? ' is-booked' : ''}" title="${iso}">${day}</span>`);
+    }
+
+    return `
+      <div class="diary-month">
+        <div class="diary-month-label">${escapeHtml(label)}</div>
+        <div class="diary-weekdays"><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span></div>
+        <div class="diary-grid">${cells.join('')}</div>
+      </div>`;
+  }).join('');
+}
+
 async function loadTrips() {
   const operatorName = state.currentUser?.operatorName;
   if (!operatorName) return;
@@ -541,6 +795,27 @@ function renderTripVehicleOptions() {
     </option>`;
   }).join('');
   if (previous) select.value = previous;
+}
+
+async function handleTripImageSelect(e) {
+  const file = (e.target.files || [])[0];
+  if (!file) return;
+
+  const status = document.getElementById('trip-image-status');
+  const original = status?.textContent;
+  if (status) status.textContent = 'Uploading to R2…';
+
+  try {
+    const url = await uploadToR2(file, 'trips');
+    document.getElementById('trip-image').value = url;
+    renderTripImagePreview();
+    if (status) status.textContent = 'Uploaded ✓';
+  } catch (err) {
+    if (status) status.textContent = original || '';
+    alert('❌ ' + err.message);
+  } finally {
+    e.target.value = '';
+  }
 }
 
 function renderTripImagePreview() {
@@ -703,6 +978,7 @@ function isPlatformActive() {
 function renderSubscription() {
   if (!state.plans) return;
   renderMembershipCard();
+  renderPlatformPlanOptions();
   renderPlanGrid();
   renderListingsTable();
   renderSuperAdminSubscriptionPanels();
@@ -720,7 +996,22 @@ function renderMembershipCard() {
     : window.location.origin + '/';
 
   document.getElementById('membership-title').textContent = plan.name;
-  document.getElementById('membership-price').textContent = money(plan.price);
+
+  // Headline shows the plan the agency is actually on; before they subscribe it
+  // shows the cheapest entry point, with both options listed underneath.
+  const plans   = plan.plans || [];
+  const current = plans.find(p => p.id === platform?.planId);
+  const cheapest = plans.reduce((a, b) => (a && a.price <= b.price ? a : b), plans[0]);
+  const headline = current || cheapest;
+
+  document.getElementById('membership-price').textContent = headline
+    ? `${money(headline.price)} / ${headline.period}`
+    : money(plan.price);
+
+  const priceLabel = document.querySelector('.membership-price-label');
+  if (priceLabel) {
+    priceLabel.textContent = current ? 'Your platform plan' : 'Platform fee from';
+  }
 
   document.getElementById('membership-benefits').innerHTML =
     plan.features.map(f => `<li>${escapeHtml(f)}</li>`).join('');
@@ -761,24 +1052,52 @@ function renderMembershipCard() {
   if (navBadge) navBadge.style.display = active ? 'none' : 'inline-block';
 }
 
+/// One flat listing fee covers every vehicle, so this renders a single card
+/// rather than one per category.
 function renderPlanGrid() {
   const grid = state.plans ? document.getElementById('plan-grid') : null;
   if (!grid) return;
 
-  const icons = { Bus: '🚌', Traveller: '🚐', Car: '🚗' };
+  const tier = state.plans.vehicleTiers[0];
+  if (!tier) {
+    grid.innerHTML = '<p class="plan-empty">No vehicle plan configured.</p>';
+    return;
+  }
 
   grid.innerHTML = `
-    <div class="plan-group">
-      <div class="plan-cards">
-        ${state.plans.vehicleTiers.map(t => `
-          <div class="plan-card">
-            <span class="plan-card-tier">${icons[t.vehicleType] || '🚘'} ${escapeHtml(t.label)}</span>
-            <span class="plan-card-seats">${escapeHtml(t.seatsLabel)}</span>
-            <div class="plan-card-price">${money(t.price)}</div>
-            <span class="plan-card-period">per vehicle / ${period()}</span>
-          </div>`).join('')}
+    <div class="plan-cards">
+      <div class="plan-card plan-card-wide">
+        <span class="plan-card-tier">🚍 ${escapeHtml(tier.label)}</span>
+        <span class="plan-card-seats">${escapeHtml(tier.seatsLabel)}</span>
+        <div class="plan-card-price">${money(tier.price)}</div>
+        <span class="plan-card-period">per vehicle / ${period()}</span>
       </div>
     </div>`;
+}
+
+/// The monthly and yearly platform options, shown beside the membership price.
+function renderPlatformPlanOptions() {
+  const box = document.getElementById('platform-plan-options');
+  if (!box) return;
+
+  const plans = state.plans?.platform?.plans || [];
+  if (!plans.length) {
+    box.innerHTML = '';
+    return;
+  }
+
+  const currentId = state.subscription?.platform?.planId;
+
+  box.innerHTML = plans.map(p => `
+    <div class="platform-plan${p.id === currentId ? ' is-current' : ''}">
+      <div class="platform-plan-head">
+        <span class="platform-plan-label">${escapeHtml(p.label)}</span>
+        <span class="platform-plan-price">${money(p.price)}</span>
+      </div>
+      <span class="platform-plan-note">
+        ${p.id === currentId ? 'Your current plan' : (p.note ? escapeHtml(p.note) : `Billed every ${escapeHtml(p.period)}`)}
+      </span>
+    </div>`).join('');
 }
 
 function renderListingsTable() {
@@ -841,9 +1160,18 @@ function renderSuperAdminSubscriptionPanels() {
   panels.classList.remove('hidden');
 
   // Pricing form — only repopulate when the owner isn't mid-edit.
+  const platformPlans = state.plans.platform.plans || [];
+  const monthlyPlan = platformPlans.find(p => p.id === 'monthly');
+  const yearlyPlan  = platformPlans.find(p => p.id === 'yearly');
+
   const platformInput = document.getElementById('price-platform');
-  if (document.activeElement !== platformInput) {
-    platformInput.value = state.plans.platform.price;
+  if (platformInput && document.activeElement !== platformInput) {
+    platformInput.value = monthlyPlan ? monthlyPlan.price : state.plans.platform.price;
+  }
+
+  const yearlyInput = document.getElementById('price-platform-yearly');
+  if (yearlyInput && yearlyPlan && document.activeElement !== yearlyInput) {
+    yearlyInput.value = yearlyPlan.price;
   }
 
   const tierInputs = document.getElementById('tier-price-inputs');
@@ -924,14 +1252,20 @@ async function handlePricingSubmit(e) {
   e.preventDefault();
 
   const platformPrice = Number(document.getElementById('price-platform').value);
+  const yearlyPrice   = Number(document.getElementById('price-platform-yearly').value);
   const tiers = [...document.querySelectorAll('#tier-price-inputs input[data-tier-id]')]
     .map(input => ({ id: input.dataset.tierId, price: Number(input.value) }));
+
+  const platformPlans = [
+    { id: 'monthly', price: platformPrice },
+    { id: 'yearly',  price: yearlyPrice }
+  ];
 
   try {
     const res = await fetch(`${API_BASE}/subscriptions/plans`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ platformPrice, tiers })
+      body: JSON.stringify({ platformPrice, platformPlans, tiers })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error || 'Failed to save pricing');
@@ -1084,7 +1418,9 @@ function renderFleetGrid() {
     return `
     <div class="vehicle-admin-card">
       <div class="card-image">
-        <img src="${(v.imageUrls || [])[0] || 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957'}" alt="${escapeHtml(v.name)}" />
+        ${(v.imageUrls || [])[0]
+          ? `<img src="${(v.imageUrls || [])[0]}" alt="${escapeHtml(v.name)}" />`
+          : `<div class="card-image-empty">No photo uploaded</div>`}
         <span class="card-badge">${v.type.toUpperCase()}</span>
       </div>
       <div class="card-body">
@@ -1319,17 +1655,17 @@ function renderVehicleSubscriptionPanel() {
   seatsEl.textContent = 'Flat fee — any seat count';
   priceEl.textContent = `${money(tier.price)}/${period()}`;
 
-  // Editing an existing vehicle: report its current subscription instead.
-  const existing = state.editingVehicleId
-    ? (state.subscription?.listings || []).find(l => l.vehicleId === state.editingVehicleId)
-    : null;
+  // Editing never charges: the listing fee is bought once when the vehicle is
+  // added, and renewed from the Subscription page. Only the add flow mentions
+  // payment at all.
+  if (state.editingVehicleId) {
+    const existing = (state.subscription?.listings || [])
+      .find(l => l.vehicleId === state.editingVehicleId);
 
-  if (existing?.status === 'active') {
-    noteEl.textContent = `Subscription active until ${formatDate(existing.expiresAt)}. Editing this vehicle does not re-charge; renew from the Subscription page.`;
-    saveBtn.textContent = 'Save Changes';
-  } else if (state.editingVehicleId) {
-    noteEl.textContent = 'This vehicle has no active subscription, so travellers cannot see it. Saving will charge the fee above and list it.';
-    saveBtn.textContent = `Save & Pay ${money(tier.price)}`;
+    noteEl.textContent = existing?.status === 'active'
+      ? `Listed until ${formatDate(existing.expiresAt)}. Updating these details does not change the subscription.`
+      : 'Updating these details does not change the subscription. Renew it from the Subscription page.';
+    saveBtn.textContent = 'Update Vehicle';
   } else {
     noteEl.textContent = `Adding this vehicle charges ${money(tier.price)} for one ${period()}. It goes live in the app straight after.`;
     saveBtn.textContent = `Add Vehicle & Pay ${money(tier.price)}`;
@@ -1379,8 +1715,10 @@ async function handleVehicleFormSubmit(e) {
   const payload = {
     name, type, vehicleNumber, operatorName, capacity, description, instagramUrl,
     availableDates,
-    imageUrls: imageUrls.length ? imageUrls : ['https://images.unsplash.com/photo-1544620347-c4fd4a3d5957'],
-    videoUrls: videoUrls.length ? videoUrls : ['https://assets.mixkit.co/videos/preview/mixkit-traffic-in-a-highway-of-a-modern-city-43063-large.mp4'],
+    // Send exactly what the agency uploaded. Substituting stock media here is
+    // what used to put a photo of someone else's coach on their listing.
+    imageUrls,
+    videoUrls,
     features
   };
 
@@ -1407,40 +1745,40 @@ async function handleVehicleFormSubmit(e) {
       throw new Error(data?.error || 'Failed to save vehicle');
     }
 
-    // Buying the vehicle's subscription is what makes it visible in the app.
-    const vehicleId = id ?? data.id;
-    const alreadyListed = (state.subscription?.listings || [])
-      .some(l => l.vehicleId === vehicleId && l.status === 'active');
-
-    if (!alreadyListed) {
-      saveBtn.textContent = 'Activating subscription…';
-      const subRes = await fetch(`${API_BASE}/subscriptions/listing`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          operatorName, vehicleId, vehicleName: name, type, capacity
-        })
-      });
-      const subData = await subRes.json().catch(() => null);
-      if (!subRes.ok) {
-        throw new Error(
-          `Vehicle saved, but its subscription failed: ${subData?.error || 'unknown error'}. ` +
-          `Pay it from the Subscription page.`
-        );
-      }
-
+    // Editing only changes details — the listing fee was already paid when the
+    // vehicle was added, and renewals happen on the Subscription page.
+    if (id) {
       closeVehicleModal();
       await loadData();
-      return alert(
-        `✅ ${name} is live in the app!\n\n` +
-        `Plan: ${tier.label} (${tier.seatsLabel})\n` +
-        `Paid: ${money(tier.price)}\n` +
-        `Listed until: ${formatDate(subData.expiresAt)}`
+      return alert(`✅ ${name} updated.`);
+    }
+
+    // Adding: buying the listing is what makes the vehicle visible in the app.
+    const vehicleId = data.id;
+    saveBtn.textContent = 'Activating subscription…';
+    const subRes = await fetch(`${API_BASE}/subscriptions/listing`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        operatorName, vehicleId, vehicleName: name, type, capacity
+      })
+    });
+    const subData = await subRes.json().catch(() => null);
+    if (!subRes.ok) {
+      throw new Error(
+        `Vehicle saved, but its subscription failed: ${subData?.error || 'unknown error'}. ` +
+        `Pay it from the Subscription page.`
       );
     }
 
     closeVehicleModal();
     await loadData();
+    return alert(
+      `✅ ${name} is live in the app!\n\n` +
+      `Plan: ${escapeHtml(tier.label)}\n` +
+      `Paid: ${money(tier.price)}\n` +
+      `Listed until: ${formatDate(subData.expiresAt)}`
+    );
   } catch (err) {
     alert('❌ ' + err.message);
   } finally {

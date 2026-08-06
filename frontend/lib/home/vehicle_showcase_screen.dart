@@ -241,12 +241,8 @@ class _ExploreTabState extends State<_ExploreTab> {
                 background: BannerCarousel(
                   slides: [
                     BannerSlide(
-                      networkUrl: '${AppConfig.publicBase}/onemind.png',
-                      assetPath: 'assets/images/onemind.png',
-                    ),
-                    BannerSlide(
-                      networkUrl: '${AppConfig.publicBase}/pompihori.png',
-                      assetPath: 'assets/images/pompihori.png',
+                      networkUrl: '${AppConfig.publicBase}/bushero.png',
+                      assetPath: 'assets/images/bushero.png',
                     ),
                   ],
                 ),
@@ -475,9 +471,9 @@ class _ExploreTabState extends State<_ExploreTab> {
                 ),
               )
             else if (list.isEmpty)
-              const SliverFillRemaining(
+              SliverFillRemaining(
                 hasScrollBody: false,
-                child: _EmptyState(),
+                child: _EmptyState(noVehiclesAtAll: _allVehicles.isEmpty),
               )
             else
               SliverPadding(
@@ -496,7 +492,11 @@ class _ExploreTabState extends State<_ExploreTab> {
 }
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState();
+  const _EmptyState({required this.noVehiclesAtAll});
+
+  /// True when no agency has listed anything yet, as opposed to the current
+  /// filters simply excluding everything — the two need different advice.
+  final bool noVehiclesAtAll;
 
   @override
   Widget build(BuildContext context) {
@@ -506,19 +506,29 @@ class _EmptyState extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.commute_outlined, size: 70, color: Colors.grey[400]),
+            Icon(
+              noVehiclesAtAll ? Icons.storefront_outlined : Icons.commute_outlined,
+              size: 70,
+              color: Colors.grey[400],
+            ),
             const SizedBox(height: 12),
-            const Text(
-              'No Vehicles Matching Filter',
-              style: TextStyle(
+            Text(
+              noVehiclesAtAll
+                  ? 'No Vehicles Listed Yet'
+                  : 'No Vehicles Matching Filter',
+              style: const TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
                 color: AppColors.black,
               ),
+              textAlign: TextAlign.center,
             ),
             const SizedBox(height: 4),
             Text(
-              'Try adjusting your category tabs or search keywords.',
+              noVehiclesAtAll
+                  ? 'Buses and cars appear here as soon as a travel agency adds them.'
+                  : 'Try adjusting your category tabs or search keywords.',
+              textAlign: TextAlign.center,
               style: TextStyle(color: Colors.grey[600]),
             ),
           ],

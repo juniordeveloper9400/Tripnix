@@ -5,8 +5,10 @@ const router = Router();
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MONTH_DAYS = 30;
 
-/// Plan catalogue. Everything is billed monthly: the agency pays one flat
-/// platform fee, plus one flat fee per vehicle regardless of type or seats.
+const YEAR_DAYS = 365;
+
+/// Plan catalogue. An agency pays a platform fee — monthly or yearly — plus one
+/// flat fee per vehicle, the same amount whatever the vehicle is.
 /// Prices are editable by the Super Admin at runtime.
 let catalogue = {
   currency: "INR",
@@ -15,9 +17,29 @@ let catalogue = {
   platform: {
     id: "platform",
     name: "Agency Platform Membership",
+    // Mirrors the monthly plan so older clients reading a single figure still
+    // show the right price. `plans` below is the real catalogue.
     price: 1500,
     durationDays: MONTH_DAYS,
-    tagline: "Monthly fee to keep your travel agency registered on Tripnix",
+    tagline: "Keeps your travel agency registered and visible on Tripnix",
+    plans: [
+      {
+        id: "monthly",
+        label: "1 Month",
+        period: "month",
+        price: 1500,
+        durationDays: MONTH_DAYS
+      },
+      {
+        id: "yearly",
+        label: "1 Year",
+        period: "year",
+        price: 15000,
+        durationDays: YEAR_DAYS,
+        // 12 months at the monthly rate would be 18,000.
+        note: "Best value — two months free"
+      }
+    ],
     features: [
       "Agency profile listed in the traveller app",
       "Browse buses and cars posted by other travel agencies",
@@ -26,30 +48,15 @@ let catalogue = {
       "Required before you can add vehicles to your fleet"
     ]
   },
-  // One flat monthly fee per vehicle. The three entries exist so the portal can
-  // group the fleet by category and so pricing can diverge later if needed —
-  // today they are deliberately the same amount.
+  // One flat fee for every vehicle — bus, traveller or car alike. Kept as a
+  // single-entry list so the shape stays stable for existing clients.
   vehicleTiers: [
     {
-      id: "bus",
-      vehicleType: "Bus",
-      label: "Bus",
-      seatsLabel: "Any seat count",
-      price: 1500
-    },
-    {
-      id: "traveller",
-      vehicleType: "Traveller",
-      label: "Traveller",
-      seatsLabel: "Any seat count",
-      price: 1500
-    },
-    {
-      id: "car",
-      vehicleType: "Car",
-      label: "Car",
-      seatsLabel: "Any seat count",
-      price: 1500
+      id: "vehicle",
+      vehicleType: "All",
+      label: "All Vehicles",
+      seatsLabel: "Bus, Traveller or Car — any seat count",
+      price: 999
     }
   ]
 };
@@ -85,15 +92,18 @@ function withStatus(sub) {
   };
 }
 
-/// Picks the subscription plan for a vehicle. Priced per vehicle by category,
-/// not by seat count.
-export function tierForVehicle(type) {
-  const wantedType = String(type || "").toLowerCase();
-  return (
-    catalogue.vehicleTiers.find(
-      (t) => t.vehicleType.toLowerCase() === wantedType
-    ) || null
-  );
+/// The listing plan for a vehicle. One flat fee covers every vehicle, so the
+/// type no longer selects between tiers — it is accepted only so callers can
+/// keep passing it.
+export function tierForVehicle() {
+  return catalogue.vehicleTiers[0] || null;
+}
+
+/// Looks up a platform plan (monthly / yearly), falling back to the first one.
+export function platformPlan(planId) {
+  const plans = catalogue.platform.plans;
+  const wanted = String(planId || "").toLowerCase();
+  return plans.find((p) => p.id.toLowerCase() === wanted) || plans[0];
 }
 
 export function autoActivateAgency(operatorName) {
@@ -185,7 +195,7 @@ router.get("/plans", (req, res) => {
 
 // PUT /api/subscriptions/plans - Super Admin updates pricing
 router.put("/plans", (req, res) => {
-  const { platformPrice, tiers } = req.body;
+  const { platformPrice, platformPlans, tiers } = req.body;
 
   if (platformPrice !== undefined) {
     const price = Number(platformPrice);
@@ -193,6 +203,27 @@ router.put("/plans", (req, res) => {
       return res.status(400).json({ error: "platformPrice must be a positive number" });
     }
     catalogue.platform.price = price;
+    // Keep the monthly plan and the legacy single figure in step.
+    const monthly = catalogue.platform.plans.find((p) => p.id === "monthly");
+    if (monthly) monthly.price = price;
+  }
+
+  if (platformPlans !== undefined) {
+    if (!Array.isArray(platformPlans)) {
+      return res.status(400).json({ error: "platformPlans must be an array" });
+    }
+    for (const incoming of platformPlans) {
+      const plan = catalogue.platform.plans.find((p) => p.id === incoming.id);
+      if (!plan) {
+        return res.status(404).json({ error: `Unknown platform plan: ${incoming.id}` });
+      }
+      const price = Number(incoming.price);
+      if (!Number.isFinite(price) || price < 0) {
+        return res.status(400).json({ error: `Invalid price for plan ${incoming.id}` });
+      }
+      plan.price = price;
+      if (plan.id === "monthly") catalogue.platform.price = price;
+    }
   }
 
   if (tiers !== undefined) {
@@ -262,13 +293,23 @@ router.get("/overview", (req, res) => {
   res.json(rows);
 });
 
-// POST /api/subscriptions/platform - pay or renew the monthly platform fee
+// POST /api/subscriptions/platform - pay or renew the platform fee.
+// Body: { operatorName, planId?: "monthly" | "yearly" }
 router.post("/platform", (req, res) => {
-  const { operatorName } = req.body;
+  const { operatorName, planId } = req.body;
   if (!operatorName || !String(operatorName).trim()) {
     return res.status(400).json({ error: "operatorName is required" });
   }
 
+  if (planId && !catalogue.platform.plans.some((p) => p.id === planId)) {
+    return res.status(400).json({
+      error: `Unknown plan "${planId}". Choose one of: ${catalogue.platform.plans
+        .map((p) => p.id)
+        .join(", ")}.`
+    });
+  }
+
+  const plan = platformPlan(planId);
   const name = String(operatorName).trim();
   const key = normalise(name);
   const existing = platformSubs.find((s) => normalise(s.operatorName) === key);
@@ -276,10 +317,12 @@ router.post("/platform", (req, res) => {
   // Renewing early extends from the current expiry, not from today.
   const now = new Date();
   const startsAt = isActive(existing) ? new Date(existing.expiresAt) : now;
-  const expiresAt = addDays(startsAt, catalogue.platform.durationDays);
+  const expiresAt = addDays(startsAt, plan.durationDays);
 
   if (existing) {
-    existing.amount += catalogue.platform.price;
+    existing.amount += plan.price;
+    existing.planId = plan.id;
+    existing.planName = `${catalogue.platform.name} (${plan.label})`;
     existing.expiresAt = expiresAt.toISOString();
     existing.renewedAt = now.toISOString();
     return res.json(withStatus(existing));
@@ -288,9 +331,9 @@ router.post("/platform", (req, res) => {
   const sub = {
     id: nextSubId++,
     operatorName: name,
-    planId: catalogue.platform.id,
-    planName: catalogue.platform.name,
-    amount: catalogue.platform.price,
+    planId: plan.id,
+    planName: `${catalogue.platform.name} (${plan.label})`,
+    amount: plan.price,
     startsAt: now.toISOString(),
     expiresAt: expiresAt.toISOString(),
     renewedAt: null

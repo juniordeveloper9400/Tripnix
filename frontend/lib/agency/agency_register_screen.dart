@@ -208,10 +208,13 @@ class _AgencyRegisterScreenState extends State<AgencyRegisterScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         title: const Row(
           children: [
-            Icon(Icons.check_circle, color: AppColors.red),
+            Icon(Icons.check_circle, color: AppColors.red, size: 28),
             SizedBox(width: 10),
             Expanded(
-              child: Text('Agency Registered', style: TextStyle(fontSize: 18)),
+              child: Text(
+                'Successfully Registered!',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
             ),
           ],
         ),
@@ -220,7 +223,7 @@ class _AgencyRegisterScreenState extends State<AgencyRegisterScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '${result['operatorName']} now has an admin portal account.',
+              '${result['operatorName']} has been registered successfully.',
               style: const TextStyle(fontSize: 14, height: 1.4),
             ),
             const SizedBox(height: 14),
@@ -252,16 +255,35 @@ class _AgencyRegisterScreenState extends State<AgencyRegisterScreen> {
               ),
             ),
             const SizedBox(height: 14),
-            const Text(
-              'Use this same username and password to sign in to the admin '
-              'portal. Next step: pay the monthly platform fee to activate your '
-              'agency.',
-              style: TextStyle(
-                fontSize: 12.5,
-                height: 1.45,
-                color: Colors.black54,
+            if (result['persisted'] == false)
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.red.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: AppColors.red.withValues(alpha: 0.3),
+                  ),
+                ),
+                child: Text(
+                  result['nextStep'] as String? ??
+                      'This account was not saved to the database.',
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    height: 1.45,
+                    color: AppColors.red,
+                  ),
+                ),
+              )
+            else
+              const Text(
+                'Your agency is now registered and active on Tripnix.',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  height: 1.45,
+                  color: Colors.black54,
+                ),
               ),
-            ),
           ],
         ),
         actions: [
@@ -271,7 +293,7 @@ class _AgencyRegisterScreenState extends State<AgencyRegisterScreen> {
               Navigator.of(context).pop();
             },
             child: const Text(
-              'Pay later',
+              'Close',
               style: TextStyle(color: Colors.grey),
             ),
           ),
@@ -290,7 +312,7 @@ class _AgencyRegisterScreenState extends State<AgencyRegisterScreen> {
                 ),
               );
             },
-            child: const Text('Continue to Payment'),
+            child: const Text('Open App / Continue'),
           ),
         ],
       ),

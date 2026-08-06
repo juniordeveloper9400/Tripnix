@@ -3,6 +3,8 @@ import '../../models/vehicle.dart';
 import '../../theme/app_colors.dart';
 import '../vehicle_detail_screen.dart';
 import 'agency_contact_sheet.dart';
+import 'vehicle_media.dart';
+import 'vehicle_schedule_sheet.dart';
 
 class VehicleCard extends StatelessWidget {
   const VehicleCard({
@@ -51,24 +53,12 @@ class VehicleCard extends StatelessWidget {
                 children: [
                   Hero(
                     tag: 'vehicle_image_${vehicle.id}',
-                    child: Image.network(
-                      vehicle.imageUrls.isNotEmpty
-                          ? vehicle.imageUrls[0]
-                          : 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&q=80&w=600',
+                    child: VehicleImage(
+                      url: vehicle.imageUrls.isNotEmpty
+                          ? vehicle.imageUrls.first
+                          : null,
                       height: 180,
-                      width: double.infinity,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        return Container(
-                          height: 180,
-                          color: Colors.grey[300],
-                          child: const Icon(
-                            Icons.directions_bus,
-                            size: 50,
-                            color: Colors.grey,
-                          ),
-                        );
-                      },
+                      emptyLabel: 'No photo yet',
                     ),
                   ),
                   // Semi-transparent gradient overlay for badge readability
@@ -254,6 +244,41 @@ class VehicleCard extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 10),
+                        // Sits beside Contact so a traveller can check the bus
+                        // is free before ringing the agency about it.
+                        GestureDetector(
+                          onTap: () => showVehicleScheduleSheet(
+                            context,
+                            vehicleId: vehicle.id,
+                            vehicleName: vehicle.name,
+                          ),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: AppColors.black, width: 1.4),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.event_note,
+                                    size: 15, color: AppColors.black),
+                                SizedBox(width: 6),
+                                Text(
+                                  'Schedule',
+                                  style: TextStyle(
+                                    color: AppColors.black,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
                         GestureDetector(
                           onTap: () => showAgencyContactSheet(
                             context,

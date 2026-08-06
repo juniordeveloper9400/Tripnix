@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart' show MediaType;
 import '../config/app_config.dart';
 import '../models/vehicle.dart';
 import '../models/booking.dart';
@@ -92,10 +93,10 @@ class ApiService {
     }
   }
 
-  /// Trips posted by agencies, for the story bar. `listed=true` keeps out
-  /// trips whose bus has lapsed, and trips that have already finished.
+  /// Live status of every publicly listed bus, for the bar at the top of the
+  /// showcase. Buses with no trip posted come back as 'Available'.
   Future<List<AgencyTrip>> fetchTrips() async {
-    final response = await http.get(Uri.parse('$baseUrl/trips?listed=true'));
+    final response = await http.get(Uri.parse('$baseUrl/trips/fleet-status'));
     if (response.statusCode != 200) {
       throw Exception('Failed to load trips: ${response.statusCode}');
     }
@@ -103,6 +104,19 @@ class ApiService {
     return data
         .map((e) => AgencyTrip.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  /// One vehicle's public diary: which dates are taken, and the trips behind
+  /// them. Customer bookings come back redacted — the API never sends another
+  /// traveller's name or number to this endpoint.
+  Future<Map<String, dynamic>> fetchVehicleSchedule(int vehicleId) async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/vehicles/$vehicleId/schedule'),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Could not load the schedule (${response.statusCode})');
+    }
+    return json.decode(response.body) as Map<String, dynamic>;
   }
 
   /// The signed-in agency's own subscribed vehicles — the ones it can post a
@@ -159,6 +173,73 @@ class ApiService {
       throw Exception(body['error'] ?? 'Could not load contact details');
     }
     return body;
+  }
+
+  /// Uploads a picked image or video to Cloudflare R2 and returns its URL.
+  ///
+  /// Small files stream through the API. Anything over the serverless body
+  /// limit is presigned so the bytes go straight to R2.
+  Future<String> uploadMedia({
+    required Uint8List bytes,
+    required String fileName,
+    required String contentType,
+    String folder = 'media',
+  }) async {
+    final cfgResponse = await http.get(Uri.parse('$baseUrl/uploads/config'));
+    final cfg = json.decode(cfgResponse.body) as Map<String, dynamic>;
+    if (cfg['configured'] != true) {
+      throw Exception('R2 storage is not configured on the server yet.');
+    }
+
+    final limit = (cfg['maxDirectUploadBytes'] as num?)?.toInt() ?? 4194304;
+
+    if (bytes.length <= limit) {
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('$baseUrl/uploads?folder=${Uri.encodeComponent(folder)}'),
+      )..files.add(http.MultipartFile.fromBytes(
+          'files',
+          bytes,
+          filename: fileName,
+          contentType: MediaType.parse(contentType),
+        ));
+
+      final streamed = await request.send();
+      final body = await streamed.stream.bytesToString();
+      final data = json.decode(body) as Map<String, dynamic>;
+      if (streamed.statusCode != 201) {
+        throw Exception(data['error'] ?? 'Upload failed');
+      }
+      return (data['urls'] as List<dynamic>).first as String;
+    }
+
+    // Too big for the API — presign and PUT straight to R2.
+    final presignResponse = await http.post(
+      Uri.parse('$baseUrl/uploads/presign'),
+      headers: _headers,
+      body: json.encode({
+        'fileName': fileName,
+        'contentType': contentType,
+        'folder': folder,
+      }),
+    );
+    final presign = json.decode(presignResponse.body) as Map<String, dynamic>;
+    if (presignResponse.statusCode != 200) {
+      throw Exception(presign['error'] ?? 'Could not presign upload');
+    }
+
+    final put = await http.put(
+      Uri.parse(presign['uploadUrl'] as String),
+      headers: {'Content-Type': contentType},
+      body: bytes,
+    );
+    if (put.statusCode < 200 || put.statusCode >= 300) {
+      throw Exception(
+        'Direct upload to R2 failed (${put.statusCode}). '
+        "Add this app's origin to the bucket's CORS policy.",
+      );
+    }
+    return presign['url'] as String;
   }
 
   // --- Agency Registration ---

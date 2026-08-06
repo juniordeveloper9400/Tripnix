@@ -25,8 +25,12 @@ class AgencyTrip {
   final String imageUrl;
   final String note;
 
-  /// 'Upcoming' | 'On Trip' | 'Completed', derived from the dates by the API.
+  /// 'On Trip' | 'Upcoming' | 'Available' | 'Completed', derived by the API
+  /// from the bus's trips. 'Available' means nothing is scheduled.
   final String status;
+
+  /// True when this row is a bus with no trip on the books.
+  bool get isAvailable => status == 'Available';
 
   /// Whether the bus behind this trip still has an active subscription.
   final bool busListed;
@@ -74,6 +78,8 @@ class AgencyTrip {
     switch (status) {
       case 'On Trip':
         return const Color(0xFF10B981);
+      case 'Available':
+        return const Color(0xFF3B82F6);
       case 'Completed':
         return const Color(0xFF9CA3AF);
       default:
@@ -105,6 +111,16 @@ class AgencyTrip {
 
   String get departureLabel => _short(departureDate);
   String get arrivalLabel => _short(arrivalDate);
+
+  /// Full form with the year, for the detail view — "5 Aug 2026".
+  static String _full(String iso) {
+    final d = DateTime.tryParse(iso);
+    if (d == null) return '—';
+    return '${d.day} ${_months[d.month - 1]} ${d.year}';
+  }
+
+  String get departureFull => _full(departureDate);
+  String get arrivalFull => _full(arrivalDate);
 
   /// e.g. "12 Aug → 15 Aug · 4 days"
   String get dateRangeLabel =>

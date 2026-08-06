@@ -8,5 +8,13 @@ build/
 .env
 .env.*
 !.env.example
+
+# Firebase service account private key — never commit.
+# Globbed loosely on purpose: a "Save As" on Windows easily produces
+# serviceAccountKey.json.json or serviceAccountKey (1).json.
+**/serviceAccountKey*
+**/*serviceaccount*.json
+**/firebase-adminsdk-*.json
+
 .DS_Store
 *.log
