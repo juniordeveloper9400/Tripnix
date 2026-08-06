@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/vehicle.dart';
 import '../models/booking.dart';
 import '../services/api_service.dart';
@@ -178,6 +179,10 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
                                       fontWeight: FontWeight.w500,
                                     ),
                                   ),
+                                  if (vehicle.instagramUrl.isNotEmpty) ...[
+                                    const SizedBox(width: 8),
+                                    _buildInstagramBadge(vehicle.instagramUrl),
+                                  ],
                                 ],
                               ),
                             ],
@@ -431,6 +436,49 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
       data = Icons.filter_hdr;
     }
     return Icon(data, size: 16, color: AppColors.red);
+  }
+
+  Widget _buildInstagramBadge(String url) {
+    String cleanUrl = url.trim();
+    if (cleanUrl.isEmpty) return const SizedBox.shrink();
+    if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
+      final handle = cleanUrl.replaceAll('@', '');
+      cleanUrl = 'https://instagram.com/$handle';
+    }
+
+    return InkWell(
+      onTap: () async {
+        final uri = Uri.parse(cleanUrl);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        }
+      },
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF833AB4), Color(0xFFFD1D1D), Color(0xFFFCB045)],
+          ),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.camera_alt_outlined, color: Colors.white, size: 11),
+            SizedBox(width: 3),
+            Text(
+              'Insta',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

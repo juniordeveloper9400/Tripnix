@@ -27,7 +27,7 @@
       <div class="login-divider"></div>
 
       <h3 class="login-title">Sign In to Your Account</h3>
-      <p class="login-subtitle">Enter the credentials provided by Tripnix Admin</p>
+      <p class="login-subtitle">Use the username and password you created when registering your agency</p>
 
       <form id="login-form">
         <div class="form-group">
@@ -42,7 +42,9 @@
         <button type="submit" id="login-submit-btn" class="btn btn-primary btn-full">Sign In</button>
       </form>
 
-      <p class="login-footer-note">Don't have credentials? Contact your Tripnix Administrator.</p>
+      <p class="login-footer-note">
+        Not registered yet? <a id="register-link" href="/" target="_blank" rel="noopener">Register your travel agency</a> on the Tripnix site first.
+      </p>
     </div>
   </div>
 
@@ -86,6 +88,15 @@
           <span class="icon">📑</span>
           <span class="label">Bookings</span>
           <span class="badge" id="pending-badge" style="display:none;">0</span>
+        </button>
+        <button class="nav-item" data-tab="trips">
+          <span class="icon">🗺️</span>
+          <span class="label">Trips</span>
+        </button>
+        <button class="nav-item" data-tab="subscription">
+          <span class="icon">💳</span>
+          <span class="label">Subscription</span>
+          <span class="badge badge-warn" id="subscription-badge" style="display:none;">!</span>
         </button>
         <!-- Super Admin Only -->
         <button class="nav-item hidden" data-tab="admins" id="nav-admins">
@@ -202,6 +213,14 @@
                   <span class="count-pill red" id="bus-count">0</span>
                 </div>
                 <div class="breakdown-item">
+                  <span class="icon">🚐</span>
+                  <div class="info">
+                    <h4>Travellers</h4>
+                    <p id="traveller-count-desc">0 travellers in fleet</p>
+                  </div>
+                  <span class="count-pill blue" id="traveller-count">0</span>
+                </div>
+                <div class="breakdown-item">
                   <span class="icon">🚗</span>
                   <div class="info">
                     <h4>Luxury Cars & SUVs</h4>
@@ -239,6 +258,7 @@
             <div class="filter-chips">
               <button class="chip active" data-filter="All">All Fleet</button>
               <button class="chip" data-filter="Bus">Buses</button>
+              <button class="chip" data-filter="Traveller">Travellers</button>
               <button class="chip" data-filter="Car">Cars</button>
             </div>
             <input type="text" id="fleet-search" placeholder="Search by vehicle name..." class="search-input" />
@@ -265,7 +285,167 @@
           </div>
         </section>
 
-        <!-- TAB 4: Manage Admins (Super Admin Only) -->
+        <!-- TAB: Trips — what travellers see in the app's story bar -->
+        <section id="tab-trips" class="tab-page">
+          <div class="dashboard-panels">
+            <div class="panel-card flex-2">
+              <div class="panel-header"><h3>Post a Trip</h3></div>
+              <div class="panel-body">
+                <form id="trip-form">
+                  <div class="form-group">
+                    <label for="trip-vehicle">Bus / Vehicle</label>
+                    <select id="trip-vehicle" required></select>
+                  </div>
+                  <div class="form-group">
+                    <label for="trip-place">Trip Place</label>
+                    <input type="text" id="trip-place" placeholder="e.g. Ooty, Tamil Nadu" required />
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group flex-1">
+                      <label for="trip-departure">Departure Date</label>
+                      <input type="date" id="trip-departure" required />
+                    </div>
+                    <div class="form-group flex-1">
+                      <label for="trip-arrival">Arrival Date</label>
+                      <input type="date" id="trip-arrival" required />
+                    </div>
+                  </div>
+                  <div class="form-group">
+                    <label for="trip-image">Trip Image URL</label>
+                    <input type="text" id="trip-image" placeholder="https://… (leave blank to use the vehicle photo)" />
+                    <div class="trip-image-preview" id="trip-image-preview"></div>
+                  </div>
+                  <div class="form-group">
+                    <label for="trip-note">Short Note</label>
+                    <input type="text" id="trip-note" placeholder="e.g. Hill station tour with night halt" />
+                  </div>
+                  <button type="submit" class="btn btn-primary btn-full">🗺️ Post Trip</button>
+                  <small style="display:block;margin-top:10px;color:var(--text-muted);font-size:11px;">
+                    Posted trips appear in the story bar at the top of the traveller app.
+                    Only vehicles with an active subscription can be used.
+                  </small>
+                </form>
+              </div>
+            </div>
+
+            <div class="panel-card flex-3">
+              <div class="panel-header">
+                <h3>Posted Trips</h3>
+                <span class="panel-header-note" id="trips-count-note"></span>
+              </div>
+              <div class="panel-body">
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Trip</th><th>Bus</th><th>Departure</th>
+                        <th>Arrival</th><th>Status</th><th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody id="trips-tbody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 4: Subscription & Plans -->
+        <section id="tab-subscription" class="tab-page">
+
+          <!-- Step 1 — Agency platform membership -->
+          <div class="membership-card" id="membership-card">
+            <div class="membership-main">
+              <span class="membership-step">AGENCY REGISTRATION · VIEW ONLY</span>
+              <h2 id="membership-title">Platform Membership</h2>
+              <p id="membership-status-line">Checking membership status…</p>
+              <ul class="membership-benefits" id="membership-benefits"></ul>
+            </div>
+            <div class="membership-side">
+              <span class="membership-price-label">Monthly platform fee</span>
+              <div class="membership-price" id="membership-price">—</div>
+              <span class="badge-status" id="membership-badge">—</span>
+
+              <dl class="membership-facts">
+                <div><dt>Registered on</dt><dd id="membership-start">—</dd></div>
+                <div><dt>Expires on</dt><dd id="membership-expiry">—</dd></div>
+                <div><dt>Time remaining</dt><dd id="membership-remaining">—</dd></div>
+                <div><dt>Total paid</dt><dd id="membership-paid">—</dd></div>
+              </dl>
+
+              <div class="membership-managed-note" id="membership-managed-note"></div>
+            </div>
+          </div>
+
+          <!-- Step 2 — Per-vehicle listing fees -->
+          <div class="panel-card">
+            <div class="panel-header">
+              <h3>Vehicle Subscription Plans</h3>
+              <span class="panel-header-note">One flat monthly fee per vehicle, for every category</span>
+            </div>
+            <div class="panel-body">
+              <div class="plan-grid" id="plan-grid"></div>
+            </div>
+          </div>
+
+          <!-- Fleet listing status -->
+          <div class="panel-card">
+            <div class="panel-header">
+              <h3>Your Fleet Listing Status</h3>
+              <span class="panel-header-note" id="listing-total-note"></span>
+            </div>
+            <div class="panel-body">
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Vehicle</th><th>Number</th><th>Type</th><th>Seats</th>
+                      <th>Monthly Fee</th><th>Status</th><th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="listings-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Super Admin Only — pricing control + agency overview -->
+          <div class="dashboard-panels hidden" id="superadmin-subscription-panels">
+            <div class="panel-card flex-2">
+              <div class="panel-header"><h3>Edit Plan Pricing</h3></div>
+              <div class="panel-body">
+                <form id="pricing-form">
+                  <div class="form-group">
+                    <label for="price-platform">Platform Membership (per month)</label>
+                    <input type="number" id="price-platform" min="0" step="1" required />
+                  </div>
+                  <div id="tier-price-inputs"></div>
+                  <button type="submit" class="btn btn-primary btn-full">💾 Save Pricing</button>
+                </form>
+              </div>
+            </div>
+
+            <div class="panel-card flex-3">
+              <div class="panel-header"><h3>All Agency Subscriptions</h3></div>
+              <div class="panel-body">
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Travel Agency</th><th>Membership</th><th>Expires</th>
+                        <th>Listed Vehicles</th><th>Total Paid</th>
+                      </tr>
+                    </thead>
+                    <tbody id="agency-subs-tbody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </section>
+
+        <!-- TAB 5: Manage Admins (Super Admin Only) -->
         <section id="tab-admins" class="tab-page">
           <div class="dashboard-panels">
             <div class="panel-card flex-2">
@@ -324,10 +504,48 @@
         <div class="form-row">
           <div class="form-group flex-1">
             <label for="vehicle-type">Type</label>
-            <select id="vehicle-type" required>
-              <option value="Bus">Bus</option>
-              <option value="Car">Car</option>
-            </select>
+            <div class="custom-dropdown" id="vehicle-type-dropdown">
+              <select id="vehicle-type" required style="display: none;">
+                <option value="Bus">Bus</option>
+                <option value="Traveller">Traveller</option>
+                <option value="Car">Car</option>
+              </select>
+
+              <button type="button" class="custom-dropdown-trigger" id="vehicle-type-trigger">
+                <span class="custom-dropdown-value">
+                  <span class="type-icon" id="selected-type-icon">🚌</span>
+                  <span id="selected-type-text">Bus</span>
+                </span>
+                <svg class="dropdown-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+              </button>
+
+              <div class="custom-dropdown-menu hidden" id="vehicle-type-menu">
+                <div class="custom-dropdown-item selected" data-value="Bus">
+                  <span class="item-icon">🚌</span>
+                  <div class="item-info">
+                    <span class="item-title">Bus</span>
+                    <span class="item-desc">Luxury coaches, sleepers, air buses</span>
+                  </div>
+                  <span class="item-check">✓</span>
+                </div>
+                <div class="custom-dropdown-item" data-value="Traveller">
+                  <span class="item-icon">🚐</span>
+                  <div class="item-info">
+                    <span class="item-title">Traveller</span>
+                    <span class="item-desc">Tempo travellers, mini coaches, vans</span>
+                  </div>
+                  <span class="item-check">✓</span>
+                </div>
+                <div class="custom-dropdown-item" data-value="Car">
+                  <span class="item-icon">🚗</span>
+                  <div class="item-info">
+                    <span class="item-title">Car</span>
+                    <span class="item-desc">SUVs, sedans, luxury cars</span>
+                  </div>
+                  <span class="item-check">✓</span>
+                </div>
+              </div>
+            </div>
           </div>
           <div class="form-group flex-2">
             <label for="vehicle-operator">Operator Name</label>
@@ -335,14 +553,33 @@
           </div>
         </div>
 
-        <div class="form-group">
-          <label for="vehicle-name">Vehicle Name / Model</label>
-          <input type="text" id="vehicle-name" placeholder="e.g. Volvo B11R Multi-Axle" required />
+        <div class="form-row">
+          <div class="form-group flex-2">
+            <label for="vehicle-name">Vehicle Name / Model</label>
+            <input type="text" id="vehicle-name" placeholder="e.g. Volvo B11R Multi-Axle" required />
+          </div>
+          <div class="form-group flex-1">
+            <label for="vehicle-number">Vehicle Number</label>
+            <input type="text" id="vehicle-number" placeholder="e.g. TN 01 AB 1234" required style="text-transform: uppercase;" />
+          </div>
         </div>
 
         <div class="form-group">
           <label for="vehicle-capacity">Capacity (Seats)</label>
           <input type="number" id="vehicle-capacity" min="1" placeholder="36" required />
+        </div>
+
+        <!-- Vehicle subscription — priced by seat count, charged on save -->
+        <div class="vehicle-sub-panel" id="vehicle-sub-panel">
+          <div class="vehicle-sub-head">
+            <span class="vehicle-sub-icon">🎟️</span>
+            <div class="vehicle-sub-tier">
+              <strong id="vehicle-sub-tier-label">—</strong>
+              <small id="vehicle-sub-tier-seats">Enter seats to see the plan</small>
+            </div>
+            <div class="vehicle-sub-price" id="vehicle-sub-price">—</div>
+          </div>
+          <p class="vehicle-sub-note" id="vehicle-sub-note"></p>
         </div>
 
         <div class="form-group date-picker-group">
@@ -372,14 +609,41 @@
           <textarea id="vehicle-description" rows="3" placeholder="Describe your bus..."></textarea>
         </div>
 
+        <!-- Instagram Account Link -->
         <div class="form-group">
-          <label for="vehicle-images">Image URLs (comma-separated)</label>
-          <input type="text" id="vehicle-images" placeholder="https://images.unsplash.com/..." />
+          <label for="vehicle-instagram">
+            <span style="display:inline-flex;align-items:center;gap:5px;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent-red)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line></svg>
+              Instagram Account Link
+            </span>
+          </label>
+          <input type="text" id="vehicle-instagram" placeholder="e.g. https://instagram.com/your_agency or @your_agency" />
         </div>
 
-        <div class="form-group">
-          <label for="vehicle-videos">Video URLs (comma-separated)</label>
-          <input type="text" id="vehicle-videos" placeholder="https://assets.mixkit.co/..." />
+        <!-- Vehicle Images Gallery Upload -->
+        <div class="form-group media-upload-group">
+          <label>📸 Vehicle Images (Upload from Gallery / Device)</label>
+          <div class="media-dropzone" id="images-dropzone">
+            <input type="file" id="vehicle-images-input" accept="image/*" multiple style="display:none;" />
+            <button type="button" class="btn btn-secondary media-upload-btn" id="upload-images-btn">
+              <span>📁 Select Images from Gallery</span>
+            </button>
+            <small class="upload-hint">Upload vehicle exterior, interior or seats photos from gallery</small>
+          </div>
+          <div id="images-preview-grid" class="media-preview-grid"></div>
+        </div>
+
+        <!-- Vehicle Videos Gallery Upload -->
+        <div class="form-group media-upload-group">
+          <label>🎥 Vehicle Videos (Upload from Gallery / Device)</label>
+          <div class="media-dropzone" id="videos-dropzone">
+            <input type="file" id="vehicle-videos-input" accept="video/*" multiple style="display:none;" />
+            <button type="button" class="btn btn-secondary media-upload-btn" id="upload-videos-btn">
+              <span>🎬 Select Videos from Gallery</span>
+            </button>
+            <small class="upload-hint">Upload walkthrough or vehicle tour videos from gallery</small>
+          </div>
+          <div id="videos-preview-grid" class="media-preview-grid"></div>
         </div>
 
         <div class="form-group">

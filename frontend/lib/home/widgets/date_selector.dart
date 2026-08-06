@@ -85,7 +85,7 @@ class _CalendarButton extends StatelessWidget {
         width: 54,
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(18),
           border: Border.all(color: Colors.grey.shade200),
         ),
         child: const Column(
@@ -130,7 +130,7 @@ class _DayChip extends StatelessWidget {
         width: 54,
         decoration: BoxDecoration(
           color: isSelected ? AppColors.red : Colors.white,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(18),
           border: Border.all(
             color: isSelected ? AppColors.red : Colors.grey.shade200,
           ),

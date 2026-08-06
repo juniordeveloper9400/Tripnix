@@ -17,7 +17,8 @@ bool vehicleAvailableOn(Vehicle vehicle, DateTime date) {
 class Vehicle {
   final int id;
   final String name;
-  final String type; // 'Bus' or 'Car'
+  final String type; // 'Bus', 'Traveller' or 'Car'
+  final String vehicleNumber;
   final String operatorName;
   final double pricePerDay;
   final int capacity;
@@ -28,12 +29,14 @@ class Vehicle {
   final String description;
   final double rating;
   final int reviewsCount;
+  final String instagramUrl;
   final String contactPhone;
 
   const Vehicle({
     required this.id,
     required this.name,
     required this.type,
+    this.vehicleNumber = '',
     required this.operatorName,
     required this.pricePerDay,
     required this.capacity,
@@ -44,6 +47,7 @@ class Vehicle {
     required this.description,
     required this.rating,
     required this.reviewsCount,
+    this.instagramUrl = '',
     this.contactPhone = '',
   });
 
@@ -52,6 +56,7 @@ class Vehicle {
       id: json['id'] as int,
       name: json['name'] as String,
       type: json['type'] as String,
+      vehicleNumber: (json['vehicleNumber'] as String? ?? '').toUpperCase(),
       operatorName: json['operatorName'] as String? ?? "My Travels",
       pricePerDay: (json['pricePerDay'] as num? ?? 0).toDouble(),
       capacity: json['capacity'] as int? ?? 36,
@@ -62,6 +67,7 @@ class Vehicle {
       description: json['description'] as String? ?? "",
       rating: (json['rating'] as num? ?? 5.0).toDouble(),
       reviewsCount: json['reviewsCount'] as int? ?? 0,
+      instagramUrl: json['instagramUrl'] as String? ?? '',
       contactPhone: json['contactPhone'] as String? ?? '',
     );
   }
@@ -71,6 +77,7 @@ class Vehicle {
       'id': id,
       'name': name,
       'type': type,
+      'vehicleNumber': vehicleNumber,
       'operatorName': operatorName,
       'pricePerDay': pricePerDay,
       'capacity': capacity,
@@ -81,6 +88,7 @@ class Vehicle {
       'description': description,
       'rating': rating,
       'reviewsCount': reviewsCount,
+      'instagramUrl': instagramUrl,
     };
   }
 }

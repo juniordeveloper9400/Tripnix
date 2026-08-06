@@ -1439,3 +1439,611 @@ input:focus, select:focus, textarea:focus {
   }
 }
 
+
+/* ===================== SUBSCRIPTION & PLANS ===================== */
+
+.panel-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.panel-header-note {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Locked "Add Vehicle" button — platform fee not paid yet */
+.btn.btn-locked {
+  opacity: 0.55;
+  filter: grayscale(0.4);
+}
+
+.btn.btn-locked::before {
+  content: '🔒 ';
+}
+
+/* Sidebar nag badge */
+.badge.badge-warn {
+  background: var(--accent-yellow);
+  color: var(--bg-primary);
+}
+
+/* ── Step 1: Platform membership card ── */
+.membership-card {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  padding: 26px;
+  margin-bottom: 24px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-color);
+  background:
+    linear-gradient(135deg, rgba(229, 57, 53, 0.16), rgba(15, 23, 42, 0)),
+    var(--bg-secondary);
+}
+
+.membership-card.is-active {
+  background:
+    linear-gradient(135deg, rgba(16, 185, 129, 0.16), rgba(15, 23, 42, 0)),
+    var(--bg-secondary);
+}
+
+.membership-main {
+  flex: 2;
+  min-width: 280px;
+}
+
+.membership-step {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+  color: var(--accent-yellow);
+  margin-bottom: 8px;
+}
+
+.membership-main h2 {
+  font-size: 24px;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+#membership-status-line {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+
+.membership-benefits {
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.membership-benefits li {
+  position: relative;
+  padding-left: 24px;
+  font-size: 13px;
+  color: var(--text-main);
+}
+
+.membership-benefits li::before {
+  content: '✓';
+  position: absolute;
+  left: 0;
+  font-weight: 800;
+  color: var(--accent-green);
+}
+
+.membership-side {
+  flex: 1;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 20px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.membership-price-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+}
+
+.membership-price {
+  font-size: 34px;
+  font-weight: 900;
+  line-height: 1;
+  color: var(--text-main);
+}
+
+.membership-side small {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ── Step 2: Plan tier cards ── */
+.plan-grid {
+  display: grid;
+  gap: 26px;
+}
+
+.plan-group-title {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 12px;
+  color: var(--text-main);
+}
+
+.plan-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px;
+}
+
+.plan-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 18px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  transition: border-color 0.18s ease, transform 0.18s ease;
+}
+
+.plan-card:hover {
+  border-color: var(--accent-red);
+  transform: translateY(-2px);
+}
+
+.plan-card-tier {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.plan-card-seats {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.plan-card-price {
+  margin-top: 8px;
+  font-size: 24px;
+  font-weight: 900;
+  color: var(--accent-yellow);
+}
+
+.plan-card-period {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+@media (max-width: 768px) {
+  .membership-card { padding: 20px; }
+  .membership-main h2 { font-size: 20px; }
+  .membership-price { font-size: 28px; }
+}
+
+/* Platform membership is read-only in the portal — bought on the Tripnix site */
+.membership-facts {
+  width: 100%;
+  display: grid;
+  gap: 8px;
+  margin: 4px 0 2px;
+}
+
+.membership-facts > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 7px;
+  border-bottom: 1px dashed var(--border-color);
+}
+
+.membership-facts > div:last-child { border-bottom: none; }
+
+.membership-facts dt {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.membership-facts dd {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.membership-managed-note {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 198, 26, 0.1);
+  border: 1px solid rgba(255, 198, 26, 0.25);
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.membership-managed-note a {
+  color: var(--accent-yellow);
+  font-weight: 700;
+  word-break: break-all;
+}
+
+/* Vehicle subscription panel inside the Add/Edit Vehicle modal */
+.vehicle-sub-panel {
+  margin-bottom: 18px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 198, 26, 0.3);
+  background: rgba(255, 198, 26, 0.08);
+}
+
+.vehicle-sub-panel.is-invalid {
+  border-color: rgba(229, 57, 53, 0.35);
+  background: rgba(229, 57, 53, 0.08);
+}
+
+.vehicle-sub-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.vehicle-sub-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.vehicle-sub-tier {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.vehicle-sub-tier strong {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.vehicle-sub-tier small {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.vehicle-sub-price {
+  font-size: 19px;
+  font-weight: 900;
+  color: var(--accent-yellow);
+  white-space: nowrap;
+}
+
+.vehicle-sub-panel.is-invalid .vehicle-sub-price {
+  color: var(--accent-red);
+}
+
+.vehicle-sub-note {
+  margin-top: 10px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+/* Vehicle registration number chip & input */
+#vehicle-number {
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.vehicle-number {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-color);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--text-main);
+  text-transform: uppercase;
+}
+
+/* Trip image preview in the Post a Trip form */
+.trip-image-preview {
+  margin-top: 10px;
+}
+
+.trip-image-preview img {
+  width: 100%;
+  max-height: 150px;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+}
+
+#trip-vehicle option:disabled {
+  color: var(--text-muted);
+}
+
+/* ===================== GALLERY MEDIA UPLOADER & MOBILE STYLES ===================== */
+.media-upload-group {
+  margin-top: 4px;
+}
+
+.media-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  border: 2px dashed var(--border-color);
+  border-radius: var(--radius-md);
+  background-color: rgba(255, 255, 255, 0.02);
+  transition: border-color 0.2s, background-color 0.2s;
+  text-align: center;
+  gap: 6px;
+}
+
+.media-dropzone:hover {
+  border-color: var(--accent-red);
+  background-color: rgba(229, 57, 53, 0.04);
+}
+
+.media-upload-btn {
+  width: 100%;
+  max-width: 320px;
+  padding: 10px 16px;
+  font-weight: 700;
+  font-size: 13px;
+  border-color: rgba(229, 57, 53, 0.4);
+  color: var(--accent-red);
+}
+
+.upload-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.media-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.media-preview-item {
+  position: relative;
+  width: 100%;
+  height: 90px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  background-color: #000;
+}
+
+.media-preview-item img,
+.media-preview-item video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.media-preview-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  background-color: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s;
+}
+
+.media-preview-remove:hover {
+  background-color: var(--accent-red);
+}
+
+/* Mobile responsive modal enhancements */
+@media (max-width: 640px) {
+  .modal-card {
+    width: 95% !important;
+    max-height: 94vh !important;
+    padding: 14px 12px !important;
+    margin: 8px auto;
+    border-radius: 18px;
+  }
+
+  .form-row {
+    flex-direction: column !important;
+    gap: 10px !important;
+  }
+
+  .features-checkboxes {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  .modal-body {
+    padding: 14px 4px !important;
+    gap: 14px !important;
+  }
+
+  .modal-header {
+    padding: 12px 6px 14px 6px !important;
+  }
+
+  .modal-footer {
+    flex-direction: column-reverse !important;
+    gap: 8px !important;
+  }
+
+  .modal-footer .btn {
+    width: 100% !important;
+    padding: 12px !important;
+  }
+}
+
+/* ===================== CUSTOM VEHICLE TYPE DROPDOWN ===================== */
+.custom-dropdown {
+  position: relative;
+  width: 100%;
+}
+
+.custom-dropdown-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  text-align: left;
+}
+
+.custom-dropdown-trigger:hover,
+.custom-dropdown-trigger:focus,
+.custom-dropdown.open .custom-dropdown-trigger {
+  outline: none;
+  border-color: var(--accent-red);
+  box-shadow: 0 0 0 2px rgba(229, 57, 53, 0.2);
+}
+
+.custom-dropdown-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.type-icon {
+  font-size: 16px;
+}
+
+.dropdown-chevron {
+  transition: transform 0.2s ease;
+  color: var(--text-muted);
+}
+
+.custom-dropdown.open .dropdown-chevron {
+  transform: rotate(180deg);
+  color: var(--accent-red);
+}
+
+.custom-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 1050;
+  background-color: #161b26;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  animation: dropdownFadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.custom-dropdown-menu.hidden {
+  display: none;
+}
+
+@keyframes dropdownFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.custom-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.custom-dropdown-item:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.custom-dropdown-item.selected {
+  background-color: rgba(229, 57, 53, 0.14);
+  border: 1px solid rgba(229, 57, 53, 0.3);
+}
+
+.item-icon {
+  font-size: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background-color: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+}
+
+.item-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 2px;
+}
+
+.item-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.item-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.item-check {
+  font-size: 14px;
+  font-weight: 900;
+  color: var(--accent-red);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.custom-dropdown-item.selected .item-check {
+  opacity: 1;
+}

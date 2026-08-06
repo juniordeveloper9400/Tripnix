@@ -2,33 +2,10 @@ import { Router } from "express";
 
 const router = Router();
 
-// In-memory bookings store
-let bookings = [
-  {
-    id: 1,
-    vehicleId: 1,
-    vehicleName: "Volvo B11R Multi-Axle",
-    userName: "John Doe",
-    userPhone: "+1234567890",
-    startDate: "2026-08-01",
-    endDate: "2026-08-05",
-    totalCost: 300.0,
-    status: "Confirmed"
-  },
-  {
-    id: 2,
-    vehicleId: 3,
-    vehicleName: "Tesla Model Y Performance",
-    userName: "Alice Smith",
-    userPhone: "+1987654321",
-    startDate: "2026-08-10",
-    endDate: "2026-08-12",
-    totalCost: 260.0,
-    status: "Pending"
-  }
-];
+// In-memory bookings store. Starts empty — bookings arrive from the app.
+let bookings = [];
 
-let nextId = 3;
+let nextId = 1;
 
 // GET /api/bookings
 router.get("/", (req, res) => {

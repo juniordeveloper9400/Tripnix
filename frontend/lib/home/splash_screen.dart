@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
-import '../config/app_config.dart';
+import '../agency/agency_gate_screen.dart';
+import '../agency/agency_session.dart';
 import 'vehicle_showcase_screen.dart';
+import 'widgets/tripnix_logo.dart';
 
 /// Full white launch screen showing the Tripnix logo, then routes into the app.
 class SplashScreen extends StatefulWidget {
@@ -27,16 +29,30 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
         .animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutBack));
     _controller.forward();
 
-    // Hold the splash briefly, then enter the app.
-    Future.delayed(const Duration(milliseconds: 2200), _goToApp);
+    _bootstrap();
   }
 
-  void _goToApp() {
+  /// Restores any saved agency session while the splash animates, then routes
+  /// to the showcase or the locked gate depending on the platform membership.
+  ///
+  /// A restore failure must never strand the user on the splash — we fall
+  /// through to the gate, where they can sign in again.
+  Future<void> _bootstrap() async {
+    final splashHold = Future<void>.delayed(const Duration(milliseconds: 2200));
+    try {
+      await AgencySession.instance.restore();
+    } catch (e) {
+      debugPrint('Tripnix: session restore failed, showing gate — $e');
+    }
+    await splashHold;
     if (!mounted) return;
+
+    final canBrowse = AgencySession.instance.canBrowse;
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
         transitionDuration: const Duration(milliseconds: 500),
-        pageBuilder: (context, animation, secondaryAnimation) => const VehicleShowcaseScreen(),
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            canBrowse ? const VehicleShowcaseScreen() : const AgencyGateScreen(),
         transitionsBuilder: (context, animation, secondaryAnimation, child) =>
             FadeTransition(opacity: animation, child: child),
       ),
@@ -58,21 +74,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
           opacity: _fade,
           child: ScaleTransition(
             scale: _scale,
-            child: Image.network(
-              '${AppConfig.publicBase}/tripnix.png',
-              width: 200,
-              fit: BoxFit.contain,
-              errorBuilder: (context, error, stackTrace) => Image.asset(
-                'assets/images/tripnix.png',
-                width: 200,
-                fit: BoxFit.contain,
-                errorBuilder: (context, error, stackTrace) => const Icon(
-                  Icons.airport_shuttle,
-                  color: Colors.black,
-                  size: 96,
-                ),
-              ),
-            ),
+            child: const TripnixLogo(width: 200),
           ),
         ),
       ),

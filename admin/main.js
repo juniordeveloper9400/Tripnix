@@ -8,10 +8,16 @@ let state = {
   vehicles: [],
   bookings: [],
   admins: [],
+  plans: null,          // plan catalogue from the backend
+  subscription: null,   // this agency's membership + vehicle listings
+  agencySubs: [],       // super admin: every agency's subscription state
+  trips: [],            // trips this agency has posted
   activeTab: 'dashboard',
   fleetFilter: 'All',
   searchQuery: '',
-  editingVehicleId: null
+  editingVehicleId: null,
+  vehicleFormImages: [],
+  vehicleFormVideos: []
 };
 
 // ─── DOM Refs ─────────────────────────────────────────────
@@ -42,8 +48,18 @@ const createAdminForm = document.getElementById('create-admin-form');
 document.addEventListener('DOMContentLoaded', () => {
   setupNavigation();
   setupEventListeners();
+  pointRegisterLinkAtSite();
   checkAuth();
 });
+
+/// The portal is served under /admin; registration lives on the Tripnix site.
+function pointRegisterLinkAtSite() {
+  const link = document.getElementById('register-link');
+  if (!link) return;
+  link.href = window.location.origin.includes('3005')
+    ? 'http://localhost:3000/'
+    : window.location.origin + '/';
+}
 
 // ─── Auth ──────────────────────────────────────────────────
 function checkAuth() {
@@ -226,6 +242,8 @@ function switchTab(tabId) {
     dashboard: ['Dashboard Overview',    'Real-time bus schedules and fleet operations'],
     fleet:     ['Fleet Management',       'Add buses, edit details, and post available dates'],
     bookings:  ['Customer Bookings',      'Review and manage booking requests'],
+    trips:     ['Trips',                  'Post trips that appear in the traveller app story bar'],
+    subscription: ['Subscription & Plans', 'Platform membership and per-vehicle listing fees'],
     admins:    ['Manage Travel Owners',   'Create and manage Travel Owner login credentials']
   };
 
@@ -235,6 +253,8 @@ function switchTab(tabId) {
   }
 
   if (tabId === 'admins') loadAdmins();
+  if (tabId === 'subscription') loadSubscription();
+  if (tabId === 'trips') loadTrips();
 }
 
 // ─── Event Listeners ───────────────────────────────────────
@@ -247,7 +267,15 @@ function setupEventListeners() {
   document.getElementById('sidebar-close-btn')?.addEventListener('click', closeSidebar);
 
   refreshBtn.addEventListener('click', loadData);
-  addVehicleBtn.addEventListener('click', () => openVehicleModal());
+  addVehicleBtn.addEventListener('click', () => {
+    // Adding vehicles is locked until the yearly platform fee is paid.
+    if (state.subscription && !isPlatformActive()) {
+      alert('🔒 Your agency is not registered yet.\n\nThe yearly platform fee is paid on the Tripnix site. See the Subscription page for the link.');
+      switchTab('subscription');
+      return;
+    }
+    openVehicleModal();
+  });
   modalCloseBtn.addEventListener('click', closeVehicleModal);
   modalCancelBtn.addEventListener('click', closeVehicleModal);
 
@@ -265,9 +293,175 @@ function setupEventListeners() {
     renderFleetGrid();
   });
 
+  document.getElementById('vehicle-number')?.addEventListener('input', e => {
+    e.target.value = e.target.value.toUpperCase();
+  });
+
   vehicleForm.addEventListener('submit', handleVehicleFormSubmit);
+
+  // Gallery media upload event listeners
+  document.getElementById('upload-images-btn')?.addEventListener('click', () => {
+    document.getElementById('vehicle-images-input')?.click();
+  });
+  document.getElementById('upload-videos-btn')?.addEventListener('click', () => {
+    document.getElementById('vehicle-videos-input')?.click();
+  });
+  document.getElementById('vehicle-images-input')?.addEventListener('change', handleImageFilesSelect);
+  document.getElementById('vehicle-videos-input')?.addEventListener('change', handleVideoFilesSelect);
+
+  // Keep the subscription panel in step with the seat count / vehicle type.
+  document.getElementById('vehicle-type')?.addEventListener('change', renderVehicleSubscriptionPanel);
+  document.getElementById('vehicle-capacity')?.addEventListener('input', renderVehicleSubscriptionPanel);
   if (createAdminForm) createAdminForm.addEventListener('submit', handleCreateAdminSubmit);
+
+  document.getElementById('pricing-form')?.addEventListener('submit', handlePricingSubmit);
+  document.getElementById('trip-form')?.addEventListener('submit', handleTripSubmit);
+  document.getElementById('trip-image')?.addEventListener('input', renderTripImagePreview);
+
+  setupCustomTypeDropdown();
 }
+
+function setupCustomTypeDropdown() {
+  const dropdown = document.getElementById('vehicle-type-dropdown');
+  const trigger  = document.getElementById('vehicle-type-trigger');
+  const menu     = document.getElementById('vehicle-type-menu');
+  const select   = document.getElementById('vehicle-type');
+  const iconSpan = document.getElementById('selected-type-icon');
+  const textSpan = document.getElementById('selected-type-text');
+  const items    = menu?.querySelectorAll('.custom-dropdown-item');
+
+  if (!trigger || !menu || !select) return;
+
+  const icons = {
+    Bus: '🚌',
+    Traveller: '🚐',
+    Car: '🚗'
+  };
+
+  window.syncCustomTypeDropdown = function(val) {
+    const value = val || select.value || 'Bus';
+    select.value = value;
+    if (iconSpan) iconSpan.textContent = icons[value] || '🚌';
+    if (textSpan) textSpan.textContent = value;
+
+    items?.forEach(item => {
+      item.classList.toggle('selected', item.dataset.value === value);
+    });
+    renderVehicleSubscriptionPanel();
+  };
+
+  trigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isOpen = dropdown.classList.contains('open');
+    if (isOpen) {
+      closeCustomTypeDropdown();
+    } else {
+      openCustomTypeDropdown();
+    }
+  });
+
+  items?.forEach(item => {
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const val = item.dataset.value;
+      window.syncCustomTypeDropdown(val);
+      closeCustomTypeDropdown();
+    });
+  });
+
+  document.addEventListener('click', (e) => {
+    if (dropdown && !dropdown.contains(e.target)) {
+      closeCustomTypeDropdown();
+    }
+  });
+}
+
+function openCustomTypeDropdown() {
+  const dropdown = document.getElementById('vehicle-type-dropdown');
+  const menu     = document.getElementById('vehicle-type-menu');
+  dropdown?.classList.add('open');
+  menu?.classList.remove('hidden');
+}
+
+function closeCustomTypeDropdown() {
+  const dropdown = document.getElementById('vehicle-type-dropdown');
+  const menu     = document.getElementById('vehicle-type-menu');
+  dropdown?.classList.remove('open');
+  menu?.classList.add('hidden');
+}
+
+function handleImageFilesSelect(e) {
+  const files = Array.from(e.target.files || []);
+  if (!files.length) return;
+  let count = 0;
+  files.forEach(file => {
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      if (evt.target?.result) {
+        state.vehicleFormImages.push(evt.target.result);
+      }
+      count++;
+      if (count === files.length) {
+        renderMediaPreviews();
+        e.target.value = '';
+      }
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function handleVideoFilesSelect(e) {
+  const files = Array.from(e.target.files || []);
+  if (!files.length) return;
+  let count = 0;
+  files.forEach(file => {
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      if (evt.target?.result) {
+        state.vehicleFormVideos.push(evt.target.result);
+      }
+      count++;
+      if (count === files.length) {
+        renderMediaPreviews();
+        e.target.value = '';
+      }
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderMediaPreviews() {
+  const imgGrid = document.getElementById('images-preview-grid');
+  const vidGrid = document.getElementById('videos-preview-grid');
+
+  if (imgGrid) {
+    imgGrid.innerHTML = state.vehicleFormImages.map((url, i) => `
+      <div class="media-preview-item">
+        <img src="${escapeHtml(url)}" alt="Vehicle image ${i + 1}" />
+        <button type="button" class="media-preview-remove" onclick="removeFormImage(${i})" title="Remove image">&times;</button>
+      </div>
+    `).join('');
+  }
+
+  if (vidGrid) {
+    vidGrid.innerHTML = state.vehicleFormVideos.map((url, i) => `
+      <div class="media-preview-item">
+        <video src="${escapeHtml(url)}" muted preload="metadata"></video>
+        <button type="button" class="media-preview-remove" onclick="removeFormVideo(${i})" title="Remove video">&times;</button>
+      </div>
+    `).join('');
+  }
+}
+
+window.removeFormImage = function(index) {
+  state.vehicleFormImages.splice(index, 1);
+  renderMediaPreviews();
+};
+
+window.removeFormVideo = function(index) {
+  state.vehicleFormVideos.splice(index, 1);
+  renderMediaPreviews();
+};
 
 // ─── Data Loading ──────────────────────────────────────────
 async function loadData() {
@@ -295,12 +489,457 @@ async function loadData() {
     renderDashboard();
     renderFleetGrid();
     renderBookingsTable();
+    await loadSubscription();
+    await loadTrips();
 
     if (state.currentUser?.role === 'superadmin') await loadAdmins();
 
   } catch (err) {
     console.error('Load error:', err);
     alert('Cannot connect to backend (http://localhost:3000). Please start the backend first.');
+  }
+}
+
+// ─── Trips (story bar in the traveller app) ────────────────
+async function loadTrips() {
+  const operatorName = state.currentUser?.operatorName;
+  if (!operatorName) return;
+
+  try {
+    const url = state.currentUser.role === 'superadmin'
+      ? `${API_BASE}/trips`
+      : `${API_BASE}/trips?operatorName=${encodeURIComponent(operatorName)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Failed to load trips');
+    state.trips = await res.json();
+    renderTripVehicleOptions();
+    renderTripsTable();
+  } catch (err) {
+    console.error('Trips load error:', err);
+  }
+}
+
+/// Only vehicles with a live subscription can carry a trip, so the picker
+/// says why the others are unavailable rather than hiding them.
+function renderTripVehicleOptions() {
+  const select = document.getElementById('trip-vehicle');
+  if (!select) return;
+
+  const listings = state.subscription?.listings || [];
+  const isListed = v => listings.some(l => l.vehicleId === v.id && l.status === 'active');
+
+  if (!state.vehicles.length) {
+    select.innerHTML = `<option value="">No vehicles in your fleet yet</option>`;
+    return;
+  }
+
+  const previous = select.value;
+  select.innerHTML = state.vehicles.map(v => {
+    const ok = isListed(v);
+    return `<option value="${v.id}" ${ok ? '' : 'disabled'}>
+      ${escapeHtml(v.name)} · ${escapeHtml(v.vehicleNumber || '—')}${ok ? '' : '  (no active subscription)'}
+    </option>`;
+  }).join('');
+  if (previous) select.value = previous;
+}
+
+function renderTripImagePreview() {
+  const box = document.getElementById('trip-image-preview');
+  const url = document.getElementById('trip-image').value.trim();
+  if (!box) return;
+  box.innerHTML = url
+    ? `<img src="${escapeHtml(url)}" alt="Trip image preview" onerror="this.style.display='none'" />`
+    : '';
+}
+
+function tripStatusClass(status) {
+  if (status === 'On Trip') return 'confirmed';
+  if (status === 'Completed') return 'cancelled';
+  return 'pending';
+}
+
+function renderTripsTable() {
+  const tbody = document.getElementById('trips-tbody');
+  const note = document.getElementById('trips-count-note');
+  if (!tbody) return;
+
+  if (!state.trips.length) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px;">No trips posted yet.</td></tr>`;
+    if (note) note.textContent = '';
+    return;
+  }
+
+  const live = state.trips.filter(t => t.busListed && t.status !== 'Completed').length;
+  if (note) note.textContent = `${live} of ${state.trips.length} showing in the app`;
+
+  tbody.innerHTML = state.trips.map(t => `
+    <tr>
+      <td>
+        <strong>${escapeHtml(t.place)}</strong><br>
+        <small style="color:var(--text-muted);">${t.durationDays} day${t.durationDays === 1 ? '' : 's'}${t.note ? ' · ' + escapeHtml(t.note) : ''}</small>
+      </td>
+      <td>
+        ${escapeHtml(t.vehicleName || '—')}<br>
+        <code class="vehicle-number">${escapeHtml(t.vehicleNumber || '—')}</code>
+      </td>
+      <td>${formatDate(t.departureDate)}</td>
+      <td>${formatDate(t.arrivalDate)}</td>
+      <td>
+        <span class="badge-status ${tripStatusClass(t.status)}">${escapeHtml(t.status)}</span>
+        ${t.busListed ? '' : '<br><small style="color:var(--accent-red);">bus not subscribed</small>'}
+      </td>
+      <td>
+        <button class="btn btn-secondary btn-sm" style="color:var(--accent-red);" onclick="deleteTrip(${t.id})">🗑️ Delete</button>
+      </td>
+    </tr>`).join('');
+}
+
+async function handleTripSubmit(e) {
+  e.preventDefault();
+  const vehicleId = document.getElementById('trip-vehicle').value;
+  if (!vehicleId) return alert('❌ Add a subscribed vehicle to your fleet first.');
+
+  const payload = {
+    operatorName: state.currentUser.operatorName,
+    vehicleId: Number(vehicleId),
+    place: document.getElementById('trip-place').value.trim(),
+    departureDate: document.getElementById('trip-departure').value,
+    arrivalDate: document.getElementById('trip-arrival').value,
+    imageUrl: document.getElementById('trip-image').value.trim(),
+    note: document.getElementById('trip-note').value.trim()
+  };
+
+  try {
+    const res = await fetch(`${API_BASE}/trips`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.error || 'Failed to post trip');
+
+    document.getElementById('trip-form').reset();
+    renderTripImagePreview();
+    await loadTrips();
+    alert(`✅ Trip to ${data.place} posted!
+
+Bus: ${data.vehicleName} (${data.vehicleNumber})
+Departs: ${formatDate(data.departureDate)}
+Arrives: ${formatDate(data.arrivalDate)}
+Status: ${data.status}`);
+  } catch (err) {
+    alert('❌ ' + err.message);
+  }
+}
+
+window.deleteTrip = async function(id) {
+  if (!confirm('Remove this trip from the traveller app?')) return;
+  try {
+    const res = await fetch(`${API_BASE}/trips/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Failed to delete trip');
+    await loadTrips();
+  } catch (err) {
+    alert('❌ ' + err.message);
+  }
+};
+
+// ─── Subscription & Plans ──────────────────────────────────
+async function loadSubscription() {
+  const operatorName = state.currentUser?.operatorName;
+  if (!operatorName) return;
+
+  try {
+    const [plansRes, subRes] = await Promise.all([
+      fetch(`${API_BASE}/subscriptions/plans`),
+      fetch(`${API_BASE}/subscriptions?operatorName=${encodeURIComponent(operatorName)}`)
+    ]);
+    if (!plansRes.ok || !subRes.ok) throw new Error('Failed to load subscription data');
+
+    state.plans = await plansRes.json();
+    state.subscription = await subRes.json();
+
+    if (state.currentUser.role === 'superadmin') {
+      const overviewRes = await fetch(`${API_BASE}/subscriptions/overview`);
+      if (overviewRes.ok) state.agencySubs = await overviewRes.json();
+    }
+
+    renderSubscription();
+  } catch (err) {
+    console.error('Subscription load error:', err);
+  }
+}
+
+/// Formats an amount using the catalogue currency, e.g. ₹12,000.
+function money(amount) {
+  const symbol = state.plans?.currencySymbol || '₹';
+  return symbol + Number(amount || 0).toLocaleString('en-IN');
+}
+
+function formatDate(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString('en-IN', {
+    day: 'numeric', month: 'short', year: 'numeric'
+  });
+}
+
+/// The subscription plan for a vehicle. One flat monthly fee per vehicle,
+/// chosen by category rather than seat count.
+function tierForVehicle(vehicle) {
+  if (!state.plans) return null;
+  return state.plans.vehicleTiers.find(t =>
+    t.vehicleType.toLowerCase() === String(vehicle.type).toLowerCase()
+  ) || null;
+}
+
+/// "month" / "year" — whatever the catalogue is billing on.
+function period() {
+  return state.plans?.billingPeriod || 'month';
+}
+
+function isPlatformActive() {
+  return state.subscription?.platform?.status === 'active';
+}
+
+function renderSubscription() {
+  if (!state.plans) return;
+  renderMembershipCard();
+  renderPlanGrid();
+  renderListingsTable();
+  renderSuperAdminSubscriptionPanels();
+  applyPlatformGate();
+}
+
+/// The platform fee is paid on the Tripnix site during agency registration, so
+/// the portal only reports its status and expiry — it can't be bought here.
+function renderMembershipCard() {
+  const plan     = state.plans.platform;
+  const platform = state.subscription?.platform;
+  const active   = isPlatformActive();
+  const siteUrl  = window.location.origin.includes('3005')
+    ? 'http://localhost:3000/'
+    : window.location.origin + '/';
+
+  document.getElementById('membership-title').textContent = plan.name;
+  document.getElementById('membership-price').textContent = money(plan.price);
+
+  document.getElementById('membership-benefits').innerHTML =
+    plan.features.map(f => `<li>${escapeHtml(f)}</li>`).join('');
+
+  const badge = document.getElementById('membership-badge');
+  const card  = document.getElementById('membership-card');
+  const line  = document.getElementById('membership-status-line');
+  const note  = document.getElementById('membership-managed-note');
+
+  card.classList.toggle('is-active', active);
+
+  document.getElementById('membership-start').textContent     = formatDate(platform?.startsAt);
+  document.getElementById('membership-expiry').textContent    = formatDate(platform?.expiresAt);
+  document.getElementById('membership-remaining').textContent = platform && active
+    ? `${platform.daysLeft} days`
+    : '—';
+  document.getElementById('membership-paid').textContent = platform ? money(platform.amount) : '—';
+
+  if (active) {
+    badge.className = 'badge-status confirmed';
+    badge.textContent = 'ACTIVE';
+    line.textContent = `${state.subscription.operatorName} is registered. You can add vehicles and browse other agencies' fleets.`;
+    note.innerHTML = `🔒 Managed on the Tripnix site — renew at <a href="${siteUrl}" target="_blank" rel="noopener">${siteUrl}</a> before it expires.`;
+  } else if (platform) {
+    badge.className = 'badge-status cancelled';
+    badge.textContent = 'EXPIRED';
+    line.textContent = 'Your membership has lapsed, so your fleet is hidden from travellers.';
+    note.innerHTML = `⚠️ Renew on the Tripnix site to go live again: <a href="${siteUrl}" target="_blank" rel="noopener">${siteUrl}</a>`;
+  } else {
+    badge.className = 'badge-status pending';
+    badge.textContent = 'NOT REGISTERED';
+    line.textContent = plan.tagline;
+    note.innerHTML = `⚠️ Pay the platform fee on the Tripnix site to activate your agency: <a href="${siteUrl}" target="_blank" rel="noopener">${siteUrl}</a>`;
+  }
+
+  // Sidebar nag when the agency still owes the platform fee.
+  const navBadge = document.getElementById('subscription-badge');
+  if (navBadge) navBadge.style.display = active ? 'none' : 'inline-block';
+}
+
+function renderPlanGrid() {
+  const grid = state.plans ? document.getElementById('plan-grid') : null;
+  if (!grid) return;
+
+  const icons = { Bus: '🚌', Traveller: '🚐', Car: '🚗' };
+
+  grid.innerHTML = `
+    <div class="plan-group">
+      <div class="plan-cards">
+        ${state.plans.vehicleTiers.map(t => `
+          <div class="plan-card">
+            <span class="plan-card-tier">${icons[t.vehicleType] || '🚘'} ${escapeHtml(t.label)}</span>
+            <span class="plan-card-seats">${escapeHtml(t.seatsLabel)}</span>
+            <div class="plan-card-price">${money(t.price)}</div>
+            <span class="plan-card-period">per vehicle / ${period()}</span>
+          </div>`).join('')}
+      </div>
+    </div>`;
+}
+
+function renderListingsTable() {
+  const tbody = document.getElementById('listings-tbody');
+  const note  = document.getElementById('listing-total-note');
+  if (!tbody) return;
+
+  if (!state.vehicles.length) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:24px;">No vehicles in your fleet yet.</td></tr>`;
+    note.textContent = '';
+    return;
+  }
+
+  const listings = state.subscription?.listings || [];
+  let outstanding = 0;
+
+  tbody.innerHTML = state.vehicles.map(v => {
+    const tier = tierForVehicle(v);
+    const sub  = listings.find(l => l.vehicleId === v.id);
+    const paid = sub?.status === 'active';
+    if (!paid && tier) outstanding += tier.price;
+
+    const statusCell = paid
+      ? `<span class="badge-status confirmed">LISTED</span><br><small style="color:var(--text-muted);">till ${formatDate(sub.expiresAt)}</small>`
+      : sub
+        ? `<span class="badge-status cancelled">EXPIRED</span>`
+        : `<span class="badge-status pending">UNPAID</span>`;
+
+    const actionCell = !tier
+      ? '<small style="color:var(--text-muted);">No matching tier</small>'
+      : `<button class="btn btn-secondary btn-sm" onclick="payListingFee(${v.id})">
+           ${paid ? '🔄 Renew' : '💳 Pay ' + money(tier.price)}
+         </button>`;
+
+    return `
+      <tr>
+        <td><strong>${escapeHtml(v.name)}</strong></td>
+        <td><code class="vehicle-number">${escapeHtml(v.vehicleNumber || '—')}</code></td>
+        <td>${escapeHtml(v.type)}</td>
+        <td>${v.capacity}</td>
+        <td>${tier ? money(tier.price) + '/' + period() : '—'}</td>
+        <td>${statusCell}</td>
+        <td>${actionCell}</td>
+      </tr>`;
+  }).join('');
+
+  note.textContent = outstanding > 0
+    ? `${money(outstanding)} / ${period()} in vehicle fees outstanding`
+    : 'All vehicles are listed and paid up';
+}
+
+function renderSuperAdminSubscriptionPanels() {
+  const panels = document.getElementById('superadmin-subscription-panels');
+  if (!panels) return;
+
+  if (state.currentUser?.role !== 'superadmin') {
+    panels.classList.add('hidden');
+    return;
+  }
+  panels.classList.remove('hidden');
+
+  // Pricing form — only repopulate when the owner isn't mid-edit.
+  const platformInput = document.getElementById('price-platform');
+  if (document.activeElement !== platformInput) {
+    platformInput.value = state.plans.platform.price;
+  }
+
+  const tierInputs = document.getElementById('tier-price-inputs');
+  if (!tierInputs.dataset.built) {
+    tierInputs.innerHTML = state.plans.vehicleTiers.map(t => `
+      <div class="form-group">
+        <label for="price-${t.id}">${escapeHtml(t.label)} <small style="color:var(--text-muted);">(per vehicle / ${period()})</small></label>
+        <input type="number" id="price-${t.id}" data-tier-id="${t.id}" min="0" step="1" required />
+      </div>`).join('');
+    tierInputs.dataset.built = 'true';
+  }
+  state.plans.vehicleTiers.forEach(t => {
+    const input = document.getElementById(`price-${t.id}`);
+    if (input && document.activeElement !== input) input.value = t.price;
+  });
+
+  // Agency overview table
+  const tbody = document.getElementById('agency-subs-tbody');
+  if (!state.agencySubs.length) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:24px;">No agency has subscribed yet.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = state.agencySubs.map(a => `
+    <tr>
+      <td><strong>${escapeHtml(a.operatorName)}</strong></td>
+      <td>${a.platform
+        ? `<span class="badge-status ${a.platform.status === 'active' ? 'confirmed' : 'cancelled'}">${a.platform.status.toUpperCase()}</span>`
+        : `<span class="badge-status pending">NONE</span>`}</td>
+      <td>${a.platform ? formatDate(a.platform.expiresAt) : '—'}</td>
+      <td>${a.activeListings} / ${a.listingCount}</td>
+      <td><strong>${money(a.totalPaid)}</strong></td>
+    </tr>`).join('');
+}
+
+/// Vehicles can only be added once the yearly platform fee is paid — the
+/// backend rejects it too, this just explains why up front.
+function applyPlatformGate() {
+  const active = isPlatformActive();
+  addVehicleBtn.title = active
+    ? 'Add a vehicle to your fleet'
+    : 'Pay the platform fee first to start adding vehicles';
+  addVehicleBtn.classList.toggle('btn-locked', !active);
+}
+
+window.payListingFee = async function(vehicleId) {
+  const vehicle = state.vehicles.find(v => v.id === vehicleId);
+  if (!vehicle) return;
+
+  const tier = tierForVehicle(vehicle);
+  if (!tier) return alert('❌ No listing tier matches this vehicle.');
+
+  if (!confirm(`Confirm payment of ${money(tier.price)} to list "${vehicle.name}" for 1 year?\n\nTier: ${tier.label} (${tier.seatsLabel})`)) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/subscriptions/listing`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        operatorName: vehicle.operatorName,
+        vehicleId: vehicle.id,
+        vehicleName: vehicle.name,
+        type: vehicle.type,
+        capacity: vehicle.capacity
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || 'Payment failed');
+
+    await loadSubscription();
+    alert(`✅ ${vehicle.name} is now listed!\n\nPlan: ${tier.label}\nPaid: ${money(tier.price)}\nValid until: ${formatDate(data.expiresAt)}`);
+  } catch (err) {
+    alert('❌ ' + err.message);
+  }
+};
+
+async function handlePricingSubmit(e) {
+  e.preventDefault();
+
+  const platformPrice = Number(document.getElementById('price-platform').value);
+  const tiers = [...document.querySelectorAll('#tier-price-inputs input[data-tier-id]')]
+    .map(input => ({ id: input.dataset.tierId, price: Number(input.value) }));
+
+  try {
+    const res = await fetch(`${API_BASE}/subscriptions/plans`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ platformPrice, tiers })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || 'Failed to save pricing');
+
+    await loadSubscription();
+    alert('✅ Plan pricing updated.');
+  } catch (err) {
+    alert('❌ ' + err.message);
   }
 }
 
@@ -396,12 +1035,15 @@ function renderDashboard() {
   pendingBadge.textContent = pending;
   pendingBadge.style.display = pending > 0 ? 'inline-block' : 'none';
 
-  const buses = state.vehicles.filter(v => v.type === 'Bus').length;
-  const cars  = state.vehicles.filter(v => v.type === 'Car').length;
-  document.getElementById('bus-count').textContent      = buses;
-  document.getElementById('bus-count-desc').textContent = `${buses} buses in fleet`;
-  document.getElementById('car-count').textContent      = cars;
-  document.getElementById('car-count-desc').textContent = `${cars} cars in fleet`;
+  const buses      = state.vehicles.filter(v => v.type === 'Bus').length;
+  const travellers = state.vehicles.filter(v => v.type === 'Traveller').length;
+  const cars       = state.vehicles.filter(v => v.type === 'Car').length;
+  document.getElementById('bus-count').textContent             = buses;
+  document.getElementById('bus-count-desc').textContent        = `${buses} buses in fleet`;
+  document.getElementById('traveller-count').textContent       = travellers;
+  document.getElementById('traveller-count-desc').textContent  = `${travellers} travellers in fleet`;
+  document.getElementById('car-count').textContent             = cars;
+  document.getElementById('car-count-desc').textContent        = `${cars} cars in fleet`;
 
   const tbody = document.getElementById('recent-bookings-tbody');
   const recent = [...state.bookings].reverse().slice(0, 5);
@@ -445,7 +1087,10 @@ function renderFleetGrid() {
       </div>
       <div class="card-body">
         <h4 class="card-title">${escapeHtml(v.name)}</h4>
-        <p class="card-operator">by ${escapeHtml(v.operatorName)}</p>
+        <p class="card-operator">
+          <code class="vehicle-number">${escapeHtml(v.vehicleNumber || '—')}</code>
+          &nbsp;·&nbsp; ${escapeHtml(v.operatorName)}
+        </p>
         <div class="card-specs">
           <span>👥 ${v.capacity} Seats</span>
           <span>⭐ ${v.rating?.toFixed(1) ?? '5.0'}</span>
@@ -606,14 +1251,21 @@ function openVehicleModal(vehicle = null) {
   // Operator is auto-filled from logged-in user (read-only)
   const op = state.currentUser?.operatorName ?? '';
 
+  const typeVal = vehicle?.type ?? 'Bus';
   document.getElementById('vehicle-id').value          = vehicle?.id ?? '';
-  document.getElementById('vehicle-type').value        = vehicle?.type ?? 'Bus';
+  document.getElementById('vehicle-type').value        = typeVal;
   document.getElementById('vehicle-operator').value    = vehicle?.operatorName ?? op;
   document.getElementById('vehicle-name').value        = vehicle?.name ?? '';
+  document.getElementById('vehicle-number').value      = vehicle?.vehicleNumber ?? '';
   document.getElementById('vehicle-capacity').value    = vehicle?.capacity ?? 36;
   document.getElementById('vehicle-description').value = vehicle?.description ?? '';
-  document.getElementById('vehicle-images').value      = (vehicle?.imageUrls ?? []).join(', ');
-  document.getElementById('vehicle-videos').value      = (vehicle?.videoUrls ?? []).join(', ');
+  document.getElementById('vehicle-instagram').value   = vehicle?.instagramUrl ?? '';
+
+  if (window.syncCustomTypeDropdown) window.syncCustomTypeDropdown(typeVal);
+
+  state.vehicleFormImages = Array.isArray(vehicle?.imageUrls) ? [...vehicle.imageUrls] : [];
+  state.vehicleFormVideos = Array.isArray(vehicle?.videoUrls) ? [...vehicle.videoUrls] : [];
+  renderMediaPreviews();
 
   const selected = vehicle?.features ?? ['AC', 'WiFi'];
   document.querySelectorAll('.features-checkboxes input').forEach(cb => {
@@ -629,7 +1281,57 @@ function openVehicleModal(vehicle = null) {
     document.getElementById('vehicle-dates').value = dates.join(', ');
   }
 
+  renderVehicleSubscriptionPanel();
   vehicleModal.classList.remove('hidden');
+}
+
+/// Shows which seat-based subscription the vehicle falls into and what saving
+/// it will cost. Updates live as the type or seat count changes.
+function renderVehicleSubscriptionPanel() {
+  const panel = document.getElementById('vehicle-sub-panel');
+  if (!panel || !state.plans) return;
+
+  const type = document.getElementById('vehicle-type').value;
+  const tier = tierForVehicle({ type });
+
+  const labelEl = document.getElementById('vehicle-sub-tier-label');
+  const seatsEl = document.getElementById('vehicle-sub-tier-seats');
+  const priceEl = document.getElementById('vehicle-sub-price');
+  const noteEl  = document.getElementById('vehicle-sub-note');
+  const saveBtn = document.getElementById('modal-save-btn');
+
+  if (!tier) {
+    panel.classList.add('is-invalid');
+    labelEl.textContent = 'No matching plan';
+    seatsEl.textContent = type || '';
+    priceEl.textContent = '—';
+    noteEl.textContent  = `No subscription plan exists for vehicle type "${type}".`;
+    saveBtn.textContent = 'Save Vehicle';
+    saveBtn.disabled = true;
+    return;
+  }
+
+  panel.classList.remove('is-invalid');
+  saveBtn.disabled = false;
+  labelEl.textContent = `${tier.label} subscription`;
+  seatsEl.textContent = 'Flat fee — any seat count';
+  priceEl.textContent = `${money(tier.price)}/${period()}`;
+
+  // Editing an existing vehicle: report its current subscription instead.
+  const existing = state.editingVehicleId
+    ? (state.subscription?.listings || []).find(l => l.vehicleId === state.editingVehicleId)
+    : null;
+
+  if (existing?.status === 'active') {
+    noteEl.textContent = `Subscription active until ${formatDate(existing.expiresAt)}. Editing this vehicle does not re-charge; renew from the Subscription page.`;
+    saveBtn.textContent = 'Save Changes';
+  } else if (state.editingVehicleId) {
+    noteEl.textContent = 'This vehicle has no active subscription, so travellers cannot see it. Saving will charge the fee above and list it.';
+    saveBtn.textContent = `Save & Pay ${money(tier.price)}`;
+  } else {
+    noteEl.textContent = `Adding this vehicle charges ${money(tier.price)} for one ${period()}. It goes live in the app straight after.`;
+    saveBtn.textContent = `Add Vehicle & Pay ${money(tier.price)}`;
+  }
 }
 
 function closeVehicleModal() {
@@ -637,6 +1339,10 @@ function closeVehicleModal() {
     datePickerInstance.clear();
   }
   updateDateChips([]);
+  state.vehicleFormImages = [];
+  state.vehicleFormVideos = [];
+  renderMediaPreviews();
+  if (window.syncCustomTypeDropdown) window.syncCustomTypeDropdown('Bus');
   vehicleModal.classList.add('hidden');
   vehicleForm.reset();
 }
@@ -644,11 +1350,13 @@ function closeVehicleModal() {
 async function handleVehicleFormSubmit(e) {
   e.preventDefault();
   const id           = state.editingVehicleId;
-  const name         = document.getElementById('vehicle-name').value.trim();
-  const type         = document.getElementById('vehicle-type').value;
+  const name          = document.getElementById('vehicle-name').value.trim();
+  const vehicleNumber = document.getElementById('vehicle-number').value.trim().toUpperCase();
+  const type          = document.getElementById('vehicle-type').value;
   const operatorName = document.getElementById('vehicle-operator').value.trim();
   const capacity     = Number(document.getElementById('vehicle-capacity').value);
   const description  = document.getElementById('vehicle-description').value.trim();
+  const instagramUrl = document.getElementById('vehicle-instagram').value.trim();
 
   let availableDates = [];
   if (datePickerInstance && datePickerInstance.selectedDates.length > 0) {
@@ -662,27 +1370,80 @@ async function handleVehicleFormSubmit(e) {
     availableDates = document.getElementById('vehicle-dates').value.split(',').map(s => s.trim()).filter(Boolean);
   }
 
-  const imageUrls    = document.getElementById('vehicle-images').value.split(',').map(s => s.trim()).filter(Boolean);
-  const videoUrls    = document.getElementById('vehicle-videos').value.split(',').map(s => s.trim()).filter(Boolean);
+  const imageUrls    = state.vehicleFormImages;
+  const videoUrls    = state.vehicleFormVideos;
   const features     = [...document.querySelectorAll('.features-checkboxes input:checked')].map(cb => cb.value);
 
   const payload = {
-    name, type, operatorName, capacity, description,
+    name, type, vehicleNumber, operatorName, capacity, description, instagramUrl,
     availableDates,
     imageUrls: imageUrls.length ? imageUrls : ['https://images.unsplash.com/photo-1544620347-c4fd4a3d5957'],
     videoUrls: videoUrls.length ? videoUrls : ['https://assets.mixkit.co/videos/preview/mixkit-traffic-in-a-highway-of-a-modern-city-43063-large.mp4'],
     features
   };
 
+  const tier = tierForVehicle({ type });
+  if (!tier) {
+    return alert('❌ No subscription plan exists for vehicle type "' + type + '".');
+  }
+
+  const saveBtn = document.getElementById('modal-save-btn');
+  const originalLabel = saveBtn.textContent;
+  saveBtn.disabled = true;
+  saveBtn.textContent = 'Saving…';
+
   try {
     const url    = id ? `${API_BASE}/vehicles/${id}` : `${API_BASE}/vehicles`;
     const method = id ? 'PUT' : 'POST';
     const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    if (!res.ok) throw new Error('Failed to save');
+
+    let data = null;
+    try { data = await res.json(); } catch { data = null; }
+
+    if (!res.ok) {
+      // 402 = the agency hasn't paid the platform fee yet.
+      throw new Error(data?.error || 'Failed to save vehicle');
+    }
+
+    // Buying the vehicle's subscription is what makes it visible in the app.
+    const vehicleId = id ?? data.id;
+    const alreadyListed = (state.subscription?.listings || [])
+      .some(l => l.vehicleId === vehicleId && l.status === 'active');
+
+    if (!alreadyListed) {
+      saveBtn.textContent = 'Activating subscription…';
+      const subRes = await fetch(`${API_BASE}/subscriptions/listing`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          operatorName, vehicleId, vehicleName: name, type, capacity
+        })
+      });
+      const subData = await subRes.json().catch(() => null);
+      if (!subRes.ok) {
+        throw new Error(
+          `Vehicle saved, but its subscription failed: ${subData?.error || 'unknown error'}. ` +
+          `Pay it from the Subscription page.`
+        );
+      }
+
+      closeVehicleModal();
+      await loadData();
+      return alert(
+        `✅ ${name} is live in the app!\n\n` +
+        `Plan: ${tier.label} (${tier.seatsLabel})\n` +
+        `Paid: ${money(tier.price)}\n` +
+        `Listed until: ${formatDate(subData.expiresAt)}`
+      );
+    }
+
     closeVehicleModal();
     await loadData();
   } catch (err) {
-    alert('❌ Could not save vehicle: ' + err.message);
+    alert('❌ ' + err.message);
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = originalLabel;
   }
 }
 

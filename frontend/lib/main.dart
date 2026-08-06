@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'admin/admin_screen.dart';
+import 'agency/agency_register_screen.dart';
 import 'home/splash_screen.dart';
 import 'theme/app_colors.dart';
 
@@ -35,6 +36,7 @@ class TripnixApp extends StatelessWidget {
       routes: {
         '/': (context) => const SplashScreen(),
         '/admin': (context) => const AdminScreen(),
+        '/register-agency': (context) => const AgencyRegisterScreen(),
       },
       onGenerateRoute: (settings) {
         if (settings.name == '/admin' || settings.name == 'admin') {

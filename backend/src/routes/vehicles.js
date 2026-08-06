@@ -1,97 +1,76 @@
 import { Router } from "express";
+import {
+  hasActivePlatformMembership,
+  isVehiclePubliclyListed,
+  listedAgencies,
+  autoActivateVehicleListing
+} from "./subscriptions.js";
+import { removeTripsForVehicle } from "./trips.js";
 
 const router = Router();
 
-// Initial in-memory fleet of buses and cars with availableDates (YYYY-MM-DD)
+// Fleet list. Pre-seeded with active default vehicles so travellers always have vehicles to browse,
+// and newly added vehicles are appended and listed immediately.
 let vehicles = [
   {
     id: 1,
     name: "Volvo B11R Multi-Axle",
     type: "Bus",
+    vehicleNumber: "TN 01 AB 1234",
     operatorName: "KPN Travels",
-    pricePerDay: 75.0,
-    capacity: 36,
-    availableDates: ["2026-07-20", "2026-07-21", "2026-07-22", "2026-07-25", "2026-07-28"],
-    features: ["AC", "WiFi", "Sleeper Berths", "USB Charger", "Individual Lights", "GPS Tracking"],
-    imageUrls: [
-      "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&q=80&w=600",
-      "https://images.unsplash.com/photo-1570125909232-eb263c188f7e?auto=format&fit=crop&q=80&w=600"
-    ],
-    videoUrls: [
-      "https://assets.mixkit.co/videos/preview/mixkit-traffic-in-a-highway-of-a-modern-city-43063-large.mp4"
-    ],
-    description: "Experience premium long-distance travel in the Volvo B11R Multi-Axle. Featuring luxury semi-sleeper seats, individual USB ports, air conditioning, and top-tier safety features.",
-    rating: 4.8,
-    reviewsCount: 124
+    pricePerDay: 15000,
+    capacity: 42,
+    availableDates: [],
+    features: ["AC", "WiFi", "Sleeper Berths", "USB Charger", "Restroom"],
+    imageUrls: ["https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&q=80&w=600"],
+    videoUrls: ["https://assets.mixkit.co/videos/preview/mixkit-traffic-in-a-highway-of-a-modern-city-43063-large.mp4"],
+    description: "Premium ultra-luxury multi-axle sleeper bus with climate control.",
+    instagramUrl: "https://instagram.com/kpntravels",
+    rating: 4.9,
+    reviewsCount: 128
   },
   {
     id: 2,
-    name: "Scania Touring HD",
-    type: "Bus",
-    operatorName: "SRS Travels",
-    pricePerDay: 85.0,
-    capacity: 45,
-    availableDates: ["2026-07-20", "2026-07-23", "2026-07-24", "2026-07-25", "2026-07-29"],
-    features: ["AC", "WiFi", "Reclining Seats", "Audio System", "Restroom", "Refreshments"],
-    imageUrls: [
-      "https://images.unsplash.com/photo-1570125909232-eb263c188f7e?auto=format&fit=crop&q=80&w=600",
-      "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&q=80&w=600"
-    ],
-    videoUrls: [
-      "https://assets.mixkit.co/videos/preview/mixkit-road-trip-on-a-sunny-day-32833-large.mp4"
-    ],
-    description: "The Scania Touring HD sets new standards in coach travel. Outfitted with plush reclining seats, onboard chemical restroom, cooling box, and climate control.",
-    rating: 4.9,
-    reviewsCount: 98
-  },
-  {
-    id: 3,
-    name: "Tesla Model Y Performance",
-    type: "Car",
-    operatorName: "Zabnix Rentals",
-    pricePerDay: 130.0,
-    capacity: 5,
-    availableDates: ["2026-07-21", "2026-07-22", "2026-07-24", "2026-07-26", "2026-07-30"],
-    features: ["AC", "Autopilot", "Panoramic Glass Roof", "Premium Sound", "Heated Seats", "Wireless Charging"],
-    imageUrls: [
-      "https://images.unsplash.com/photo-1617788138017-80ad40651399?auto=format&fit=crop&q=80&w=600",
-      "https://images.unsplash.com/photo-1619767886558-efdc259cde1a?auto=format&fit=crop&q=80&w=600"
-    ],
-    videoUrls: [
-      "https://assets.mixkit.co/videos/preview/mixkit-car-driving-on-a-wet-highway-41603-large.mp4"
-    ],
-    description: "The Tesla Model Y Performance offers sports car acceleration and unmatched electric efficiency.",
-    rating: 4.7,
-    reviewsCount: 56
-  },
-  {
-    id: 4,
-    name: "Toyota Land Cruiser Prado",
-    type: "Car",
-    operatorName: "Explorer Travels",
-    pricePerDay: 110.0,
-    capacity: 7,
-    availableDates: ["2026-07-20", "2026-07-22", "2026-07-25", "2026-07-27"],
-    features: ["AC", "4WD", "Sunroof", "Spacious Boot", "Leather Seats", "Cruise Control"],
-    imageUrls: [
-      "https://images.unsplash.com/photo-1533473359331-0135ef1b58bf?auto=format&fit=crop&q=80&w=600",
-      "https://images.unsplash.com/photo-1503376780353-7e6692767b70?auto=format&fit=crop&q=80&w=600"
-    ],
-    videoUrls: [
-      "https://assets.mixkit.co/videos/preview/mixkit-road-trip-on-a-sunny-day-32833-large.mp4"
-    ],
-    description: "Conquer any terrain with the Toyota Land Cruiser Prado. A luxury 4WD SUV designed to provide maximum comfort.",
-    rating: 4.6,
-    reviewsCount: 42
+    name: "Force Traveller 3350 Luxury",
+    type: "Traveller",
+    vehicleNumber: "TN 37 CD 5678",
+    operatorName: "Royal Travels",
+    pricePerDay: 4500,
+    capacity: 12,
+    availableDates: [],
+    features: ["AC", "WiFi", "Audio System", "USB Charger"],
+    imageUrls: ["https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&q=80&w=600"],
+    videoUrls: ["https://assets.mixkit.co/videos/preview/mixkit-traffic-in-a-highway-of-a-modern-city-43063-large.mp4"],
+    description: "Comfortable 12-seater mini coach ideal for hill tours and family trips.",
+    instagramUrl: "https://instagram.com/royaltravels",
+    rating: 4.8,
+    reviewsCount: 94
   }
 ];
 
-let nextId = 5;
+let nextId = 3;
 
-// GET /api/vehicles (supports ?date=YYYY-MM-DD & ?operatorName=...)
+// Pre-activate default seeded vehicles
+vehicles.forEach((v) => autoActivateVehicleListing(v.operatorName, v.id, v.type));
+
+/// Lookup helpers for other routes (trips) — avoids duplicating the store.
+export function findVehicle(id) {
+  return vehicles.find((v) => v.id === Number(id));
+}
+
+export function allVehicles() {
+  return vehicles;
+}
+
+// GET /api/vehicles (supports ?date=YYYY-MM-DD, ?operatorName=... & ?listed=true)
 router.get("/", (req, res) => {
-  const { date, operatorName } = req.query;
+  const { date, operatorName, listed } = req.query;
   let result = vehicles;
+
+  // The traveller app passes listed=true so only listed vehicles are shown.
+  if (listed === "true") {
+    result = result.filter(isVehiclePubliclyListed);
+  }
 
   if (operatorName) {
     result = result.filter(
@@ -109,6 +88,12 @@ router.get("/", (req, res) => {
   res.json(result);
 });
 
+// GET /api/vehicles/agencies - registered agencies visible to travellers.
+// Declared before /:id so "agencies" isn't parsed as an id.
+router.get("/agencies", (req, res) => {
+  res.json(listedAgencies(vehicles));
+});
+
 // GET /api/vehicles/:id
 router.get("/:id", (req, res) => {
   const vehicle = vehicles.find((v) => v.id === Number(req.params.id));
@@ -118,10 +103,16 @@ router.get("/:id", (req, res) => {
 
 // POST /api/vehicles
 router.post("/", (req, res) => {
-  const { name, type, operatorName, pricePerDay, capacity, availableDates, features, imageUrls, videoUrls, description } = req.body;
+  const { name, type, vehicleNumber, operatorName, pricePerDay, capacity, availableDates, features, imageUrls, videoUrls, description, instagramUrl } = req.body;
   if (!name || !type || !capacity) {
     return res.status(400).json({ error: "name, type, and capacity are required" });
   }
+  if (!vehicleNumber || !String(vehicleNumber).trim()) {
+    return res.status(400).json({ error: "vehicleNumber is required" });
+  }
+
+  const owner = operatorName || "My Travels";
+  hasActivePlatformMembership(owner);
 
   const parsedAvailableDates = Array.isArray(availableDates)
     ? availableDates.map((d) => String(d).trim()).filter(Boolean)
@@ -131,7 +122,8 @@ router.post("/", (req, res) => {
     id: nextId++,
     name,
     type,
-    operatorName: operatorName || "My Travels",
+    vehicleNumber: String(vehicleNumber).trim().toUpperCase(),
+    operatorName: owner,
     pricePerDay: Number(pricePerDay || 0),
     capacity: Number(capacity),
     availableDates: parsedAvailableDates,
@@ -139,11 +131,13 @@ router.post("/", (req, res) => {
     imageUrls: Array.isArray(imageUrls) && imageUrls.length > 0 ? imageUrls : ["https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?auto=format&fit=crop&q=80&w=600"],
     videoUrls: Array.isArray(videoUrls) && videoUrls.length > 0 ? videoUrls : ["https://assets.mixkit.co/videos/preview/mixkit-traffic-in-a-highway-of-a-modern-city-43063-large.mp4"],
     description: description || "No description provided.",
+    instagramUrl: instagramUrl ? String(instagramUrl).trim() : "",
     rating: 5.0,
     reviewsCount: 0
   };
 
   vehicles.push(newVehicle);
+  autoActivateVehicleListing(owner, newVehicle.id, newVehicle.type);
   res.status(201).json(newVehicle);
 });
 
@@ -153,7 +147,7 @@ router.put("/:id", (req, res) => {
   const index = vehicles.findIndex((v) => v.id === id);
   if (index === -1) return res.status(404).json({ error: "Vehicle not found" });
 
-  const { name, type, operatorName, pricePerDay, capacity, availableDates, features, imageUrls, videoUrls, description } = req.body;
+  const { name, type, vehicleNumber, operatorName, pricePerDay, capacity, availableDates, features, imageUrls, videoUrls, description, instagramUrl } = req.body;
 
   const parsedAvailableDates = Array.isArray(availableDates)
     ? availableDates.map((d) => String(d).trim()).filter(Boolean)
@@ -163,6 +157,9 @@ router.put("/:id", (req, res) => {
     ...vehicles[index],
     name: name || vehicles[index].name,
     type: type || vehicles[index].type,
+    vehicleNumber: vehicleNumber
+      ? String(vehicleNumber).trim().toUpperCase()
+      : vehicles[index].vehicleNumber,
     operatorName: operatorName || vehicles[index].operatorName,
     pricePerDay: pricePerDay !== undefined ? Number(pricePerDay) : vehicles[index].pricePerDay,
     capacity: capacity !== undefined ? Number(capacity) : vehicles[index].capacity,
@@ -170,7 +167,8 @@ router.put("/:id", (req, res) => {
     features: Array.isArray(features) ? features : vehicles[index].features,
     imageUrls: Array.isArray(imageUrls) && imageUrls.length > 0 ? imageUrls : vehicles[index].imageUrls,
     videoUrls: Array.isArray(videoUrls) && videoUrls.length > 0 ? videoUrls : vehicles[index].videoUrls,
-    description: description || vehicles[index].description
+    description: description || vehicles[index].description,
+    instagramUrl: instagramUrl !== undefined ? String(instagramUrl).trim() : (vehicles[index].instagramUrl || "")
   };
 
   res.json(vehicles[index]);
@@ -182,6 +180,7 @@ router.delete("/:id", (req, res) => {
   const exists = vehicles.some((v) => v.id === id);
   if (!exists) return res.status(404).json({ error: "Vehicle not found" });
   vehicles = vehicles.filter((v) => v.id !== id);
+  removeTripsForVehicle(id);
   res.status(204).end();
 });
 
