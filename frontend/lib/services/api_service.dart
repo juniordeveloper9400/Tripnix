@@ -242,6 +242,25 @@ class ApiService {
     return presign['url'] as String;
   }
 
+  Map<String, dynamic> _parseResponseMap(http.Response response, {String defaultError = 'Request failed'}) {
+    try {
+      final decoded = json.decode(response.body);
+      if (decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+      return {'error': defaultError};
+    } catch (_) {
+      if (response.statusCode >= 500) {
+        throw Exception('Server error (${response.statusCode}). Please try again shortly.');
+      }
+      if (response.statusCode == 404) {
+        throw Exception('Resource not found (404).');
+      }
+      final clean = response.body.replaceAll(RegExp(r'<[^>]*>'), '').trim();
+      throw Exception(clean.isNotEmpty && clean.length < 150 ? clean : defaultError);
+    }
+  }
+
   // --- Agency Registration ---
 
   /// Registers a new travel agency and returns the portal credentials.
@@ -268,7 +287,7 @@ class ApiService {
       }),
     );
 
-    final body = json.decode(response.body) as Map<String, dynamic>;
+    final body = _parseResponseMap(response, defaultError: 'Registration failed');
     if (response.statusCode != 201) {
       throw Exception(body['error'] ?? 'Registration failed');
     }
@@ -285,7 +304,7 @@ class ApiService {
       headers: _headers,
       body: json.encode({'username': username, 'password': password}),
     );
-    final body = json.decode(response.body) as Map<String, dynamic>;
+    final body = _parseResponseMap(response, defaultError: 'Invalid username or password');
     if (response.statusCode != 200) {
       throw Exception(body['error'] ?? 'Invalid username or password');
     }
