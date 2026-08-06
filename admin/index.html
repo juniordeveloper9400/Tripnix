@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tripnix — Travels Owner Admin Portal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/dark.css">
+  <script type="module" crossorigin src="/admin/assets/index-CAc8XlQM.js"></script>
+  <link rel="stylesheet" crossorigin href="/admin/assets/index-BDzVK8ou.css">
+</head>
+<body>
+
+  <!-- ===================== LOGIN SCREEN ===================== -->
+  <div id="login-screen" class="login-backdrop">
+    <div class="login-card">
+      <div class="login-brand">
+        <img src="tripnix.png" alt="Tripnix Logo" class="login-logo" onerror="this.style.display='none'" />
+        <div class="login-brand-text">
+          <h1>Tripnix</h1>
+          <span>Travels Owner Portal</span>
+        </div>
+      </div>
+
+      <div class="login-divider"></div>
+
+      <h3 class="login-title">Sign In to Your Account</h3>
+      <p class="login-subtitle">Use the username and password you created when registering your agency</p>
+
+      <form id="login-form">
+        <div class="form-group">
+          <label for="login-username">Username</label>
+          <input type="text" id="login-username" placeholder="Username" autocomplete="username" required />
+        </div>
+        <div class="form-group">
+          <label for="login-password">Password</label>
+          <input type="password" id="login-password" placeholder="Enter your password" autocomplete="current-password" required />
+        </div>
+        <div id="login-error" class="error-banner hidden"></div>
+        <button type="submit" id="login-submit-btn" class="btn btn-primary btn-full">Sign In</button>
+      </form>
+
+      <p class="login-footer-note">
+        Not registered yet? <a id="register-link" href="/" target="_blank" rel="noopener">Register your travel agency</a> on the Tripnix site first.
+      </p>
+    </div>
+  </div>
+
+  <!-- ===================== MAIN APP LAYOUT ===================== -->
+  <div id="app-layout" class="app-layout hidden">
+    <!-- Overlay backdrop for mobile sidebar -->
+    <div id="sidebar-overlay" class="sidebar-overlay"></div>
+
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <!-- Brand -->
+      <div class="brand">
+        <img src="tripnix.png" alt="Tripnix Logo" class="brand-logo-img" onerror="this.style.display='none'" />
+        <div class="brand-text">
+          <h2>Tripnix</h2>
+          <span>Owner Portal</span>
+        </div>
+        <button id="sidebar-close-btn" class="sidebar-close-btn" aria-label="Close menu">&times;</button>
+      </div>
+
+      <!-- Travel Agency Identity Block -->
+      <div class="agency-identity-block hidden" id="agency-identity-block">
+        <div class="agency-avatar" id="agency-avatar-letter"></div>
+        <div class="agency-details">
+          <strong id="agency-name-display"></strong>
+          <small id="agency-username-display"></small>
+        </div>
+      </div>
+
+      <!-- Navigation -->
+      <nav class="nav-menu">
+        <button class="nav-item active" data-tab="dashboard">
+          <span class="icon">📊</span>
+          <span class="label">Dashboard</span>
+        </button>
+        <button class="nav-item" data-tab="fleet">
+          <span class="icon">🚌</span>
+          <span class="label">Manage Fleet</span>
+        </button>
+        <button class="nav-item" data-tab="bookings">
+          <span class="icon">📑</span>
+          <span class="label">Bookings</span>
+          <span class="badge" id="pending-badge" style="display:none;">0</span>
+        </button>
+        <button class="nav-item" data-tab="trips">
+          <span class="icon">🗺️</span>
+          <span class="label">Trips</span>
+        </button>
+        <button class="nav-item" data-tab="schedule">
+          <span class="icon">📆</span>
+          <span class="label">Bus Diary</span>
+        </button>
+        <button class="nav-item" data-tab="subscription">
+          <span class="icon">💳</span>
+          <span class="label">Subscription</span>
+          <span class="badge badge-warn" id="subscription-badge" style="display:none;">!</span>
+        </button>
+        <!-- Super Admin Only -->
+        <button class="nav-item hidden" data-tab="admins" id="nav-admins">
+          <span class="icon">👑</span>
+          <span class="label">Manage Admins</span>
+        </button>
+      </nav>
+
+      <!-- Spacer -->
+      <div style="flex: 1;"></div>
+
+      <!-- Sidebar Footer — Profile + Logout -->
+      <div class="sidebar-footer">
+        <div class="server-status">
+          <span class="status-dot"></span>
+          <span>API Connected (3000)</span>
+        </div>
+        <div class="profile-logout-row hidden" id="profile-logout-row">
+          <div class="profile-mini">
+            <div class="profile-mini-avatar" id="profile-mini-avatar"></div>
+            <div class="profile-mini-info">
+              <strong id="profile-mini-name"></strong>
+              <small id="profile-mini-username"></small>
+            </div>
+          </div>
+          <button id="logout-btn" class="logout-btn" title="Logout">
+            <span class="logout-icon">⏻</span>
+            <span class="logout-label">Logout</span>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <header class="top-header">
+        <div style="display: flex; align-items: center;">
+          <button id="sidebar-toggle-btn" class="sidebar-toggle-btn" aria-label="Toggle Navigation Menu" title="Toggle Navigation Menu">
+            <span class="hamburger-line"></span>
+            <span class="hamburger-line"></span>
+            <span class="hamburger-line"></span>
+          </button>
+          <div class="header-title">
+            <h1 id="page-title">Dashboard Overview</h1>
+            <p id="page-subtitle">Real-time bus schedules and fleet operations</p>
+          </div>
+        </div>
+        <div class="header-actions">
+          <button id="refresh-btn" class="btn btn-secondary">
+            <span>🔄</span> Refresh
+          </button>
+          <button id="add-vehicle-header-btn" class="btn btn-primary">
+            <span>➕</span> Add Vehicle
+          </button>
+        </div>
+      </header>
+
+      <div class="content-body">
+
+        <!-- TAB 1: Dashboard -->
+        <section id="tab-dashboard" class="tab-page active">
+          <div class="hero-banner">
+            <div class="hero-text">
+              <span class="hero-badge">TRIPNIX FLEET OPERATIONS</span>
+              <h2 id="hero-agency-name">Welcome</h2>
+              <p>Post bus available dates, showcase your fleet, and manage customer travel bookings.</p>
+            </div>
+            <div class="hero-image-wrapper">
+              <img src="pompihori.png" alt="Tripnix Fleet Hero" class="hero-img" onerror="this.style.display='none'" />
+            </div>
+          </div>
+
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-icon red">🚌</div>
+              <div class="stat-details">
+                <span class="stat-label">Total Fleet Units</span>
+                <h3 id="stat-fleet">0 Units</h3>
+              </div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon green">📅</div>
+              <div class="stat-details">
+                <span class="stat-label">Active Date Schedules</span>
+                <h3 id="stat-schedules">0 Days</h3>
+              </div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon blue">✅</div>
+              <div class="stat-details">
+                <span class="stat-label">Confirmed Bookings</span>
+                <h3 id="stat-confirmed">0</h3>
+              </div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon yellow">⏳</div>
+              <div class="stat-details">
+                <span class="stat-label">Pending Approvals</span>
+                <h3 id="stat-pending">0</h3>
+              </div>
+            </div>
+          </div>
+
+          <div class="dashboard-panels">
+            <div class="panel-card flex-2">
+              <div class="panel-header"><h3>Fleet Category Breakdown</h3></div>
+              <div class="panel-body fleet-breakdown">
+                <div class="breakdown-item">
+                  <span class="icon">🚌</span>
+                  <div class="info">
+                    <h4>Buses & Coaches</h4>
+                    <p id="bus-count-desc">0 buses in fleet</p>
+                  </div>
+                  <span class="count-pill red" id="bus-count">0</span>
+                </div>
+                <div class="breakdown-item">
+                  <span class="icon">🚐</span>
+                  <div class="info">
+                    <h4>Travellers</h4>
+                    <p id="traveller-count-desc">0 travellers in fleet</p>
+                  </div>
+                  <span class="count-pill blue" id="traveller-count">0</span>
+                </div>
+                <div class="breakdown-item">
+                  <span class="icon">🚗</span>
+                  <div class="info">
+                    <h4>Luxury Cars & SUVs</h4>
+                    <p id="car-count-desc">0 cars in fleet</p>
+                  </div>
+                  <span class="count-pill yellow" id="car-count">0</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel-card flex-3">
+              <div class="panel-header"><h3>Recent Booking Orders</h3></div>
+              <div class="panel-body">
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Vehicle</th>
+                        <th>Client</th>
+                        <th>Dates</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody id="recent-bookings-tbody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 2: Fleet Management -->
+        <section id="tab-fleet" class="tab-page">
+          <div class="fleet-filter-bar">
+            <div class="filter-chips">
+              <button class="chip active" data-filter="All">All Fleet</button>
+              <button class="chip" data-filter="Bus">Buses</button>
+              <button class="chip" data-filter="Traveller">Travellers</button>
+              <button class="chip" data-filter="Car">Cars</button>
+            </div>
+            <input type="text" id="fleet-search" placeholder="Search by vehicle name..." class="search-input" />
+          </div>
+          <div class="vehicle-cards-grid" id="vehicles-grid"></div>
+        </section>
+
+        <!-- TAB 3: Bookings -->
+        <section id="tab-bookings" class="tab-page">
+          <div class="panel-card">
+            <div class="panel-header"><h3>All Customer Bookings</h3></div>
+            <div class="panel-body">
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>ID</th><th>Vehicle</th><th>Client</th><th>Phone</th><th>Period</th><th>Status</th><th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="all-bookings-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB: Trips — what travellers see in the app's story bar -->
+        <section id="tab-trips" class="tab-page">
+          <div class="dashboard-panels">
+            <div class="panel-card flex-2">
+              <div class="panel-header"><h3>Post a Trip</h3></div>
+              <div class="panel-body">
+                <form id="trip-form">
+                  <div class="form-group">
+                    <label for="trip-vehicle">Bus / Vehicle</label>
+                    <select id="trip-vehicle" required></select>
+                  </div>
+                  <div class="form-group">
+                    <label for="trip-place">Trip Place</label>
+                    <input type="text" id="trip-place" placeholder="e.g. Ooty, Tamil Nadu" required />
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group flex-1">
+                      <label for="trip-departure">Departure Date</label>
+                      <input type="date" id="trip-departure" required />
+                    </div>
+                    <div class="form-group flex-1">
+                      <label for="trip-arrival">Arrival Date</label>
+                      <input type="date" id="trip-arrival" required />
+                    </div>
+                  </div>
+                  <div class="form-group">
+                    <label for="trip-image">Trip Image</label>
+                    <input type="hidden" id="trip-image" />
+                    <input type="file" id="trip-image-input" accept="image/*" style="display:none;" />
+                    <button type="button" class="btn btn-secondary btn-full" id="trip-image-btn">
+                      🖼️ Choose image from device
+                    </button>
+                    <small id="trip-image-status" style="display:block;margin-top:6px;color:var(--text-muted);font-size:11px;">
+                      Uploaded to Cloudflare R2. Leave empty to use the vehicle photo.
+                    </small>
+                    <div class="trip-image-preview" id="trip-image-preview"></div>
+                  </div>
+                  <div class="form-group">
+                    <label for="trip-note">Short Note</label>
+                    <input type="text" id="trip-note" placeholder="e.g. Hill station tour with night halt" />
+                  </div>
+                  <button type="submit" class="btn btn-primary btn-full">🗺️ Post Trip</button>
+                  <small style="display:block;margin-top:10px;color:var(--text-muted);font-size:11px;">
+                    Posted trips appear in the story bar at the top of the traveller app.
+                    Only vehicles with an active subscription can be used.
+                  </small>
+                </form>
+              </div>
+            </div>
+
+            <div class="panel-card flex-3">
+              <div class="panel-header">
+                <h3>Posted Trips</h3>
+                <span class="panel-header-note" id="trips-count-note"></span>
+              </div>
+              <div class="panel-body">
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Trip</th><th>Bus</th><th>Departure</th>
+                        <th>Arrival</th><th>Status</th><th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody id="trips-tbody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 4: Subscription & Plans -->
+        <!-- TAB: Bus Diary — one schedule per vehicle -->
+        <section id="tab-schedule" class="tab-page">
+          <div class="panel-card">
+            <div class="panel-header">
+              <h3>Bus Diary</h3>
+              <span class="panel-header-note">Pick a bus to see everything booked against it</span>
+            </div>
+            <div class="panel-body">
+              <div class="diary-bus-picker" id="diary-bus-picker"></div>
+            </div>
+          </div>
+
+          <div class="dashboard-panels">
+            <div class="panel-card flex-2">
+              <div class="panel-header">
+                <h3 id="diary-vehicle-title">Schedule</h3>
+                <span class="panel-header-note" id="diary-vehicle-sub"></span>
+              </div>
+              <div class="panel-body">
+                <div class="diary-summary" id="diary-summary"></div>
+                <div class="diary-list" id="diary-list"></div>
+              </div>
+            </div>
+
+            <div class="panel-card flex-1">
+              <div class="panel-header"><h3>Booked Dates</h3></div>
+              <div class="panel-body">
+                <div class="diary-calendar" id="diary-calendar"></div>
+                <p class="diary-legend">
+                  <span class="diary-dot is-booked"></span> Booked
+                  <span class="diary-dot is-free"></span> Free
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="tab-subscription" class="tab-page">
+
+          <!-- Step 1 — Agency platform membership -->
+          <div class="membership-card" id="membership-card">
+            <div class="membership-main">
+              <span class="membership-step">AGENCY REGISTRATION · VIEW ONLY</span>
+              <h2 id="membership-title">Platform Membership</h2>
+              <p id="membership-status-line">Checking membership status…</p>
+              <ul class="membership-benefits" id="membership-benefits"></ul>
+            </div>
+            <div class="membership-side">
+              <span class="membership-price-label">Platform fee</span>
+              <div class="membership-price" id="membership-price">—</div>
+              <div class="platform-plan-options" id="platform-plan-options"></div>
+              <span class="badge-status" id="membership-badge">—</span>
+
+              <dl class="membership-facts">
+                <div><dt>Registered on</dt><dd id="membership-start">—</dd></div>
+                <div><dt>Expires on</dt><dd id="membership-expiry">—</dd></div>
+                <div><dt>Time remaining</dt><dd id="membership-remaining">—</dd></div>
+                <div><dt>Total paid</dt><dd id="membership-paid">—</dd></div>
+              </dl>
+
+              <div class="membership-managed-note" id="membership-managed-note"></div>
+            </div>
+          </div>
+
+          <!-- Step 2 — Per-vehicle listing fees -->
+          <div class="panel-card">
+            <div class="panel-header">
+              <h3>Vehicle Listing Plan</h3>
+              <span class="panel-header-note">One flat fee per vehicle — bus, traveller or car</span>
+            </div>
+            <div class="panel-body">
+              <div class="plan-grid" id="plan-grid"></div>
+            </div>
+          </div>
+
+          <!-- Fleet listing status -->
+          <div class="panel-card">
+            <div class="panel-header">
+              <h3>Your Fleet Listing Status</h3>
+              <span class="panel-header-note" id="listing-total-note"></span>
+            </div>
+            <div class="panel-body">
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Vehicle</th><th>Number</th><th>Type</th><th>Seats</th>
+                      <th>Monthly Fee</th><th>Status</th><th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="listings-tbody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- Super Admin Only — pricing control + agency overview -->
+          <div class="dashboard-panels hidden" id="superadmin-subscription-panels">
+            <div class="panel-card flex-2">
+              <div class="panel-header"><h3>Edit Plan Pricing</h3></div>
+              <div class="panel-body">
+                <form id="pricing-form">
+                  <div class="form-group">
+                    <label for="price-platform">Platform Membership <small style="color:var(--text-muted);">(1 month)</small></label>
+                    <input type="number" id="price-platform" min="0" step="1" required />
+                  </div>
+                  <div class="form-group">
+                    <label for="price-platform-yearly">Platform Membership <small style="color:var(--text-muted);">(1 year)</small></label>
+                    <input type="number" id="price-platform-yearly" min="0" step="1" required />
+                  </div>
+                  <div id="tier-price-inputs"></div>
+                  <button type="submit" class="btn btn-primary btn-full">💾 Save Pricing</button>
+                </form>
+              </div>
+            </div>
+
+            <div class="panel-card flex-3">
+              <div class="panel-header"><h3>All Agency Subscriptions</h3></div>
+              <div class="panel-body">
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Travel Agency</th><th>Membership</th><th>Expires</th>
+                        <th>Listed Vehicles</th><th>Total Paid</th>
+                      </tr>
+                    </thead>
+                    <tbody id="agency-subs-tbody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </section>
+
+        <!-- TAB 5: Manage Admins (Super Admin Only) -->
+        <section id="tab-admins" class="tab-page">
+          <div class="dashboard-panels">
+            <div class="panel-card flex-2">
+              <div class="panel-header"><h3>Create Travel Owner Account</h3></div>
+              <div class="panel-body">
+                <form id="create-admin-form">
+                  <div class="form-group">
+                    <label for="admin-username">Username</label>
+                    <input type="text" id="admin-username" placeholder="e.g. kpnadmin" required />
+                  </div>
+                  <div class="form-group">
+                    <label for="admin-password">Password</label>
+                    <input type="text" id="admin-password" placeholder="e.g. kpn@2026" required />
+                  </div>
+                  <div class="form-group">
+                    <label for="admin-operator">Travel Agency Name</label>
+                    <input type="text" id="admin-operator" placeholder="e.g. KPN Travels" required />
+                  </div>
+                  <div class="form-group">
+                    <label for="admin-phone">Mobile Number</label>
+                    <input type="tel" id="admin-phone" placeholder="e.g. 98765 43210" required />
+                    <small style="color:var(--text-muted);font-size:11px;">
+                      Travellers see this number on the agency's vehicles in the app.
+                    </small>
+                  </div>
+                  <button type="submit" class="btn btn-primary">➕ Create Account</button>
+                </form>
+              </div>
+            </div>
+
+            <div class="panel-card flex-3">
+              <div class="panel-header"><h3>All Travel Owner Accounts</h3></div>
+              <div class="panel-body">
+                <div class="table-responsive">
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>#</th><th>Username</th><th>Password</th><th>Travel Agency</th><th>Mobile</th><th>Role</th><th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody id="admins-table-tbody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <!-- ===================== VEHICLE MODAL ===================== -->
+  <div id="vehicle-modal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="modal-title">Add New Vehicle</h3>
+        <button id="modal-close-btn" class="close-btn">&times;</button>
+      </div>
+      <form id="vehicle-form" class="modal-body">
+        <input type="hidden" id="vehicle-id" />
+
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label for="vehicle-type">Type</label>
+            <div class="custom-dropdown" id="vehicle-type-dropdown">
+              <select id="vehicle-type" required style="display: none;">
+                <option value="Bus">Bus</option>
+                <option value="Traveller">Traveller</option>
+                <option value="Car">Car</option>
+              </select>
+
+              <button type="button" class="custom-dropdown-trigger" id="vehicle-type-trigger">
+                <span class="custom-dropdown-value">
+                  <span class="type-icon" id="selected-type-icon">🚌</span>
+                  <span id="selected-type-text">Bus</span>
+                </span>
+                <svg class="dropdown-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+              </button>
+
+              <div class="custom-dropdown-menu hidden" id="vehicle-type-menu">
+                <div class="custom-dropdown-item selected" data-value="Bus">
+                  <span class="item-icon">🚌</span>
+                  <div class="item-info">
+                    <span class="item-title">Bus</span>
+                    <span class="item-desc">Luxury coaches, sleepers, air buses</span>
+                  </div>
+                  <span class="item-check">✓</span>
+                </div>
+                <div class="custom-dropdown-item" data-value="Traveller">
+                  <span class="item-icon">🚐</span>
+                  <div class="item-info">
+                    <span class="item-title">Traveller</span>
+                    <span class="item-desc">Tempo travellers, mini coaches, vans</span>
+                  </div>
+                  <span class="item-check">✓</span>
+                </div>
+                <div class="custom-dropdown-item" data-value="Car">
+                  <span class="item-icon">🚗</span>
+                  <div class="item-info">
+                    <span class="item-title">Car</span>
+                    <span class="item-desc">SUVs, sedans, luxury cars</span>
+                  </div>
+                  <span class="item-check">✓</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="form-group flex-2">
+            <label for="vehicle-operator">Operator Name</label>
+            <input type="text" id="vehicle-operator" placeholder="e.g. KPN Travels" required readonly />
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group flex-2">
+            <label for="vehicle-name">Vehicle Name / Model</label>
+            <input type="text" id="vehicle-name" placeholder="e.g. Volvo B11R Multi-Axle" required />
+          </div>
+          <div class="form-group flex-1">
+            <label for="vehicle-number">Vehicle Number</label>
+            <input type="text" id="vehicle-number" placeholder="e.g. TN 01 AB 1234" required style="text-transform: uppercase;" />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="vehicle-capacity">Capacity (Seats)</label>
+          <input type="number" id="vehicle-capacity" min="1" placeholder="36" required />
+        </div>
+
+        <!-- Vehicle subscription — priced by seat count, charged on save -->
+        <div class="vehicle-sub-panel" id="vehicle-sub-panel">
+          <div class="vehicle-sub-head">
+            <span class="vehicle-sub-icon">🎟️</span>
+            <div class="vehicle-sub-tier">
+              <strong id="vehicle-sub-tier-label">—</strong>
+              <small id="vehicle-sub-tier-seats">Enter seats to see the plan</small>
+            </div>
+            <div class="vehicle-sub-price" id="vehicle-sub-price">—</div>
+          </div>
+          <p class="vehicle-sub-note" id="vehicle-sub-note"></p>
+        </div>
+
+        <div class="form-group date-picker-group">
+          <label for="vehicle-dates">
+            <span>📅 Available Dates Schedule</span>
+            <span class="dates-count-badge" id="selected-dates-count">0 dates selected</span>
+          </label>
+          
+          <div class="date-input-wrapper">
+            <input type="text" id="vehicle-dates" placeholder="Click to choose available dates from calendar..." readonly />
+            <button type="button" id="open-calendar-btn" class="calendar-icon-btn" title="Open Calendar">📅</button>
+          </div>
+
+          <div class="date-presets">
+            <button type="button" class="preset-btn" id="preset-today">Today</button>
+            <button type="button" class="preset-btn" id="preset-next-7">Next 7 Days</button>
+            <button type="button" class="preset-btn" id="preset-next-14">Next 14 Days</button>
+            <button type="button" class="preset-btn preset-btn-clear" id="preset-clear">Clear All</button>
+          </div>
+
+          <div id="selected-date-chips" class="selected-date-chips"></div>
+          <small style="color:var(--text-muted);font-size:11px;">Select single or multiple dates from calendar when vehicle is available for trips.</small>
+        </div>
+
+        <div class="form-group">
+          <label for="vehicle-description">Description</label>
+          <textarea id="vehicle-description" rows="3" placeholder="Describe your bus..."></textarea>
+        </div>
+
+        <!-- Instagram Account Link -->
+        <div class="form-group">
+          <label for="vehicle-instagram">
+            <span style="display:inline-flex;align-items:center;gap:5px;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent-red)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line></svg>
+              Instagram Account Link
+            </span>
+          </label>
+          <input type="text" id="vehicle-instagram" placeholder="e.g. https://instagram.com/your_agency or @your_agency" />
+        </div>
+
+        <!-- Vehicle Images Gallery Upload -->
+        <div class="form-group media-upload-group">
+          <label>📸 Vehicle Images (Upload from Gallery / Device)</label>
+          <div class="media-dropzone" id="images-dropzone">
+            <input type="file" id="vehicle-images-input" accept="image/*" multiple style="display:none;" />
+            <button type="button" class="btn btn-secondary media-upload-btn" id="upload-images-btn">
+              <span>📁 Select Images from Gallery</span>
+            </button>
+            <small class="upload-hint">Upload vehicle exterior, interior or seats photos from gallery</small>
+          </div>
+          <div id="images-preview-grid" class="media-preview-grid"></div>
+        </div>
+
+        <!-- Vehicle Videos Gallery Upload -->
+        <div class="form-group media-upload-group">
+          <label>🎥 Vehicle Videos (Upload from Gallery / Device)</label>
+          <div class="media-dropzone" id="videos-dropzone">
+            <input type="file" id="vehicle-videos-input" accept="video/*" multiple style="display:none;" />
+            <small id="media-upload-status" style="display:block;margin-top:6px;color:var(--accent-yellow);font-size:11px;"></small>
+            <button type="button" class="btn btn-secondary media-upload-btn" id="upload-videos-btn">
+              <span>🎬 Select Videos from Gallery</span>
+            </button>
+            <small class="upload-hint">Upload walkthrough or vehicle tour videos from gallery</small>
+          </div>
+          <div id="videos-preview-grid" class="media-preview-grid"></div>
+        </div>
+
+        <div class="form-group">
+          <label>Features & Amenities</label>
+          <div class="features-checkboxes">
+            <label class="checkbox-label"><input type="checkbox" value="AC" checked /> AC</label>
+            <label class="checkbox-label"><input type="checkbox" value="WiFi" checked /> WiFi</label>
+            <label class="checkbox-label"><input type="checkbox" value="Sleeper Berths" /> Sleeper Berths</label>
+            <label class="checkbox-label"><input type="checkbox" value="USB Charger" /> USB Charger</label>
+            <label class="checkbox-label"><input type="checkbox" value="Restroom" /> Restroom</label>
+            <label class="checkbox-label"><input type="checkbox" value="Audio System" /> Audio System</label>
+            <label class="checkbox-label"><input type="checkbox" value="4WD" /> 4WD</label>
+            <label class="checkbox-label"><input type="checkbox" value="Sunroof" /> Sunroof</label>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" id="modal-cancel-btn" class="btn btn-secondary">Cancel</button>
+          <button type="submit" id="modal-save-btn" class="btn btn-primary">Save Vehicle</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+</body>
+</html>
