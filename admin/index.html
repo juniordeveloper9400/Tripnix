@@ -464,6 +464,13 @@
                     <label for="admin-operator">Travel Agency Name</label>
                     <input type="text" id="admin-operator" placeholder="e.g. KPN Travels" required />
                   </div>
+                  <div class="form-group">
+                    <label for="admin-phone">Mobile Number</label>
+                    <input type="tel" id="admin-phone" placeholder="e.g. 98765 43210" required />
+                    <small style="color:var(--text-muted);font-size:11px;">
+                      Travellers see this number on the agency's vehicles in the app.
+                    </small>
+                  </div>
                   <button type="submit" class="btn btn-primary">➕ Create Account</button>
                 </form>
               </div>
@@ -476,7 +483,7 @@
                   <table class="data-table">
                     <thead>
                       <tr>
-                        <th>#</th><th>Username</th><th>Password</th><th>Travel Agency</th><th>Role</th><th>Action</th>
+                        <th>#</th><th>Username</th><th>Password</th><th>Travel Agency</th><th>Mobile</th><th>Role</th><th>Action</th>
                       </tr>
                     </thead>
                     <tbody id="admins-table-tbody"></tbody>

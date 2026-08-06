@@ -148,6 +148,19 @@ class ApiService {
     return AgencyTrip.fromJson(body);
   }
 
+  /// The contact details an agency gave when its account was created, so a
+  /// traveller can call the operator straight from a vehicle card.
+  Future<Map<String, dynamic>> fetchAgencyContact(String operatorName) async {
+    final response = await http.get(Uri.parse(
+      '$baseUrl/auth/agency-contact?operatorName=${Uri.encodeComponent(operatorName)}',
+    ));
+    final body = json.decode(response.body) as Map<String, dynamic>;
+    if (response.statusCode != 200) {
+      throw Exception(body['error'] ?? 'Could not load contact details');
+    }
+    return body;
+  }
+
   // --- Agency Registration ---
 
   /// Registers a new travel agency and returns the portal credentials.

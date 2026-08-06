@@ -359,7 +359,7 @@ class _AddTripStatusScreenState extends State<AddTripStatusScreen> {
                                       child: Container(
                                         padding: const EdgeInsets.all(6),
                                         decoration: const BoxDecoration(
-                                          color: Colors.black70,
+                                          color: Colors.black54,
                                           shape: BoxShape.circle,
                                         ),
                                         child: const Icon(Icons.close, color: Colors.white, size: 16),

@@ -91,19 +91,43 @@ router.post("/register", (req, res) => {
 
 // GET /api/auth/admins - List all admins (for Super Admin)
 router.get("/admins", (req, res) => {
-  const safeAdmins = admins.map(({ id, username, password, operatorName, role }) => ({
+  const safeAdmins = admins.map(({ id, username, password, operatorName, phone, role }) => ({
     id,
     username,
     password, // Included so Super Admin can view created passwords
     operatorName,
+    phone: phone || "",
     role
   }));
   res.json(safeAdmins);
 });
 
+// GET /api/auth/agency-contact?operatorName=... - the phone the agency gave
+// when it registered, so travellers can call the operator from the app.
+router.get("/agency-contact", (req, res) => {
+  const { operatorName } = req.query;
+  if (!operatorName) {
+    return res.status(400).json({ error: "operatorName query param is required" });
+  }
+
+  const agency = admins.find(
+    (a) => a.operatorName.toLowerCase() === String(operatorName).trim().toLowerCase()
+  );
+  if (!agency) {
+    return res.status(404).json({ error: "Agency not found" });
+  }
+
+  res.json({
+    operatorName: agency.operatorName,
+    ownerName: agency.ownerName || "",
+    phone: agency.phone || "",
+    email: agency.email || ""
+  });
+});
+
 // POST /api/auth/admins - Create new Admin (Super Admin action)
 router.post("/admins", (req, res) => {
-  const { username, password, operatorName } = req.body;
+  const { username, password, operatorName, ownerName, phone, email } = req.body;
 
   if (!username || !password || !operatorName) {
     return res.status(400).json({ error: "Username, password, and operatorName are required" });
@@ -122,7 +146,11 @@ router.post("/admins", (req, res) => {
     username: username.trim(),
     password: password.trim(),
     operatorName: operatorName.trim(),
-    role: "admin"
+    ownerName: (ownerName || "").trim(),
+    phone: (phone || "").trim(),
+    email: (email || "").trim(),
+    role: "admin",
+    registeredAt: new Date().toISOString()
   };
 
   admins.push(newAdmin);
@@ -132,6 +160,7 @@ router.post("/admins", (req, res) => {
     username: newAdmin.username,
     password: newAdmin.password,
     operatorName: newAdmin.operatorName,
+    phone: newAdmin.phone,
     role: newAdmin.role
   });
 });

@@ -4,6 +4,7 @@ import '../models/vehicle.dart';
 import '../models/booking.dart';
 import '../services/api_service.dart';
 import '../theme/app_colors.dart';
+import 'widgets/agency_contact_sheet.dart';
 
 class VehicleDetailScreen extends StatefulWidget {
   const VehicleDetailScreen({super.key, required this.vehicle});
@@ -309,6 +310,27 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
                         );
                       }).toList(),
                     ),
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 50,
+                      child: OutlinedButton.icon(
+                        onPressed: _openBookingSheet,
+                        icon: const Icon(Icons.event_available, size: 18),
+                        label: const Text(
+                          'Request a Booking',
+                          style: TextStyle(
+                              fontSize: 14.5, fontWeight: FontWeight.bold),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.black,
+                          side: BorderSide(color: Colors.grey.shade300),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                      ),
+                    ),
                   ]),
                 ),
               ),
@@ -337,71 +359,64 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'TOTAL RENTAL RATE',
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.grey,
-                            letterSpacing: 0.5,
+                    // No rate here — travellers deal directly with the agency,
+                    // so the footer leads with the vehicle number and a way to
+                    // reach the operator on the number it registered with.
+                    Expanded(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'VEHICLE NUMBER',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.grey,
+                              letterSpacing: 0.5,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 2),
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.baseline,
-                          textBaseline: TextBaseline.alphabetic,
-                          children: [
-                            const Text(
-                              '\$',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.red,
-                              ),
+                          const SizedBox(height: 3),
+                          Text(
+                            vehicle.vehicleNumber.isEmpty
+                                ? '—'
+                                : vehicle.vehicleNumber,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w900,
+                              color: AppColors.black,
+                              letterSpacing: 0.5,
                             ),
-                            Text(
-                              vehicle.pricePerDay.toStringAsFixed(0),
-                              style: const TextStyle(
-                                fontSize: 26,
-                                fontWeight: FontWeight.w900,
-                                color: AppColors.red,
-                              ),
-                            ),
-                            Text(
-                              ' / day',
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: Colors.grey[600],
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
+                          ),
+                        ],
+                      ),
                     ),
+                    const SizedBox(width: 12),
                     ElevatedButton(
-                      onPressed: _openBookingSheet,
+                      onPressed: () => showAgencyContactSheet(
+                        context,
+                        vehicle.operatorName,
+                      ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.black,
                         foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 16),
+                        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16),
                         ),
                         elevation: 0,
                       ),
                       child: const Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
+                          Icon(Icons.call, size: 17),
+                          SizedBox(width: 8),
                           Text(
-                            'Book Now',
+                            'Contact',
                             style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                           ),
-                          SizedBox(width: 8),
-                          Icon(Icons.arrow_forward, size: 16),
                         ],
                       ),
                     ),

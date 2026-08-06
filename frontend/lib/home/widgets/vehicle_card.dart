@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../models/vehicle.dart';
 import '../../theme/app_colors.dart';
 import '../vehicle_detail_screen.dart';
+import 'agency_contact_sheet.dart';
 
 class VehicleCard extends StatelessWidget {
   const VehicleCard({
@@ -218,64 +219,68 @@ class VehicleCard extends StatelessWidget {
                     const SizedBox(height: 12),
                     const Divider(height: 1, color: Color(0xFFEEEEEE)),
                     const SizedBox(height: 12),
-                    // Price Row
+                    // Contact row — no pricing on the card. Tapping reveals the
+                    // mobile number the agency gave when its account was made.
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Price / Day',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: Colors.grey[600],
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.baseline,
-                              textBaseline: TextBaseline.alphabetic,
-                              children: [
-                                const Text(
-                                  '\$',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
-                                    color: AppColors.red,
-                                  ),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Vehicle Number',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey[600],
+                                  fontWeight: FontWeight.w500,
                                 ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                vehicle.vehicleNumber.isEmpty
+                                    ? '—'
+                                    : vehicle.vehicleNumber,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w900,
+                                  color: AppColors.black,
+                                  letterSpacing: 0.4,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        GestureDetector(
+                          onTap: () => showAgencyContactSheet(
+                            context,
+                            vehicle.operatorName,
+                          ),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: AppColors.black,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.call, size: 15, color: Colors.white),
+                                SizedBox(width: 6),
                                 Text(
-                                  vehicle.pricePerDay.toStringAsFixed(0),
-                                  style: const TextStyle(
-                                    fontSize: 22,
-                                    fontWeight: FontWeight.w900,
-                                    color: AppColors.red,
+                                  'Contact',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
                                   ),
                                 ),
                               ],
                             ),
-                          ],
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: AppColors.black,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Row(
-                            children: [
-                              Text(
-                                'Book Now',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 13,
-                                ),
-                              ),
-                              SizedBox(width: 4),
-                              Icon(Icons.arrow_forward, size: 14, color: Colors.white),
-                            ],
                           ),
                         ),
                       ],

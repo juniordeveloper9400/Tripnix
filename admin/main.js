@@ -961,12 +961,13 @@ async function handleCreateAdminSubmit(e) {
   const username     = document.getElementById('admin-username').value.trim();
   const password     = document.getElementById('admin-password').value.trim();
   const operatorName = document.getElementById('admin-operator').value.trim();
+  const phone        = document.getElementById('admin-phone').value.trim();
 
   try {
     const res = await fetch(`${API_BASE}/auth/admins`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password, operatorName })
+      body: JSON.stringify({ username, password, operatorName, phone })
     });
     let errData = null;
     try { errData = await res.json(); } catch { errData = null; }
@@ -986,7 +987,7 @@ function renderAdminsTable() {
   if (!tbody) return;
 
   if (!state.admins.length) {
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px;">No travel owner accounts yet.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:24px;">No travel owner accounts yet.</td></tr>`;
     return;
   }
 
@@ -996,6 +997,7 @@ function renderAdminsTable() {
       <td><strong>${escapeHtml(a.username)}</strong></td>
       <td><code style="background:rgba(255,255,255,0.08);padding:2px 6px;border-radius:4px;">${escapeHtml(a.password)}</code></td>
       <td>${escapeHtml(a.operatorName)}</td>
+      <td>${a.phone ? escapeHtml(a.phone) : '<span style="color:var(--text-muted);">—</span>'}</td>
       <td><span class="badge-status ${a.role === 'superadmin' ? 'confirmed' : 'pending'}">${a.role === 'superadmin' ? 'Developer' : 'Travel Owner'}</span></td>
       <td>
         ${a.role !== 'superadmin'
