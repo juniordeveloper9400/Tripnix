@@ -957,13 +957,18 @@ function formatDate(iso) {
   });
 }
 
-/// The subscription plan for a vehicle. One flat monthly fee per vehicle,
-/// chosen by category rather than seat count.
-function tierForVehicle(vehicle) {
-  if (!state.plans) return null;
-  return state.plans.vehicleTiers.find(t =>
-    t.vehicleType.toLowerCase() === String(vehicle.type).toLowerCase()
-  ) || null;
+/// The listing plan for a vehicle. One flat fee per vehicle, per period.
+///
+/// One flat fee covers every vehicle, so this must not match on type. Matching
+/// "Bus" against the catalogue's single "All" tier never succeeded, which put
+/// "No subscription plan exists for vehicle type Bus" in the Add Vehicle form
+/// and replaced the Pay button in the Subscription table with "No matching
+/// tier" — so no vehicle could be added or subscribed at all.
+///
+/// The API charges `vehicleTiers[0]` regardless of type, and this has to agree
+/// with it or the price quoted here is not the price charged.
+function tierForVehicle() {
+  return state.plans?.vehicleTiers?.[0] || null;
 }
 
 /// "month" / "year" — whatever the catalogue is billing on.
@@ -1221,8 +1226,8 @@ window.payListingFee = async function(vehicleId) {
   const vehicle = state.vehicles.find(v => v.id === vehicleId);
   if (!vehicle) return;
 
-  const tier = tierForVehicle(vehicle);
-  if (!tier) return alert('❌ No listing tier matches this vehicle.');
+  const tier = tierForVehicle();
+  if (!tier) return alert('❌ No vehicle listing plan is configured.');
 
   // The API bills a listing for one billing period, so the confirmation has to
   // quote that same period rather than a hardcoded year.
@@ -1244,6 +1249,12 @@ window.payListingFee = async function(vehicleId) {
     if (!res.ok) throw new Error(data?.error || 'Payment failed');
 
     await loadSubscription();
+    // Being listed is what makes a bus visible in the app and selectable for a
+    // trip, so the views that read that have to be redrawn too — otherwise the
+    // fleet card still reads "not listed" until the next full refresh.
+    renderFleetGrid();
+    renderTripVehicleOptions();
+
     alert(`✅ ${vehicle.name} is now listed!\n\nPlan: ${tier.label}\nPaid: ${money(tier.price)}\nValid until: ${formatDate(data.expiresAt)}`);
   } catch (err) {
     alert('❌ ' + err.message);
@@ -1588,6 +1599,12 @@ function openVehicleModal(vehicle = null) {
   state.editingVehicleId = vehicle?.id ?? null;
   modalTitle.textContent = vehicle ? 'Edit Vehicle' : 'Add New Vehicle';
 
+  // Set here as well as in the subscription panel below, because that panel
+  // only runs once the plan catalogue has loaded — until then the button kept
+  // whatever label the previous use of the modal left on it.
+  const saveBtn = document.getElementById('modal-save-btn');
+  if (saveBtn) saveBtn.textContent = vehicle ? 'Update Vehicle' : 'Add Vehicle';
+
   // Operator is auto-filled from logged-in user (read-only)
   const op = state.currentUser?.operatorName ?? '';
 
@@ -1631,8 +1648,9 @@ function renderVehicleSubscriptionPanel() {
   const panel = document.getElementById('vehicle-sub-panel');
   if (!panel || !state.plans) return;
 
+  const editing = Boolean(state.editingVehicleId);
   const type = document.getElementById('vehicle-type').value;
-  const tier = tierForVehicle({ type });
+  const tier = tierForVehicle();
 
   const labelEl = document.getElementById('vehicle-sub-tier-label');
   const seatsEl = document.getElementById('vehicle-sub-tier-seats');
@@ -1642,12 +1660,14 @@ function renderVehicleSubscriptionPanel() {
 
   if (!tier) {
     panel.classList.add('is-invalid');
-    labelEl.textContent = 'No matching plan';
+    labelEl.textContent = 'No listing plan configured';
     seatsEl.textContent = type || '';
     priceEl.textContent = '—';
-    noteEl.textContent  = `No subscription plan exists for vehicle type "${type}".`;
-    saveBtn.textContent = 'Save Vehicle';
-    saveBtn.disabled = true;
+    noteEl.textContent  = 'No vehicle listing plan is configured. Ask the Super Admin to set one on the Subscription page.';
+    saveBtn.textContent = editing ? 'Update Vehicle' : 'Add Vehicle';
+    // Editing changes details only and never touches the listing fee, so a
+    // missing plan must not block it.
+    saveBtn.disabled = !editing;
     return;
   }
 
@@ -1660,7 +1680,7 @@ function renderVehicleSubscriptionPanel() {
   // Editing never charges: the listing fee is bought once when the vehicle is
   // added, and renewed from the Subscription page. Only the add flow mentions
   // payment at all.
-  if (state.editingVehicleId) {
+  if (editing) {
     const existing = (state.subscription?.listings || [])
       .find(l => l.vehicleId === state.editingVehicleId);
 
@@ -1669,8 +1689,10 @@ function renderVehicleSubscriptionPanel() {
       : 'Updating these details does not change the subscription. Renew it from the Subscription page.';
     saveBtn.textContent = 'Update Vehicle';
   } else {
+    // The panel right above already states the fee, so the button just names
+    // the action.
     noteEl.textContent = `Adding this vehicle charges ${money(tier.price)} for one ${period()}. It goes live in the app straight after.`;
-    saveBtn.textContent = `Add Vehicle & Pay ${money(tier.price)}`;
+    saveBtn.textContent = 'Add Vehicle';
   }
 }
 
@@ -1724,9 +1746,10 @@ async function handleVehicleFormSubmit(e) {
     features
   };
 
-  const tier = tierForVehicle({ type });
-  if (!tier) {
-    return alert('❌ No subscription plan exists for vehicle type "' + type + '".');
+  // Only adding buys a listing, so a missing plan must not block an edit.
+  const tier = tierForVehicle();
+  if (!tier && !id) {
+    return alert('❌ No vehicle listing plan is configured, so this vehicle cannot be listed yet.');
   }
 
   const saveBtn = document.getElementById('modal-save-btn');
