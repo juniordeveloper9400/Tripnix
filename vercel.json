@@ -1,6 +1,12 @@
 {
   "buildCommand": "bash scripts/build.sh",
   "outputDirectory": "dist",
+  "functions": {
+    "api/index.js": {
+      "maxDuration": 30,
+      "includeFiles": "backend/src/**"
+    }
+  },
   "redirects": [
     {
       "source": "/admin",

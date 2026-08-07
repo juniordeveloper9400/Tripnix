@@ -242,6 +242,19 @@ class ApiService {
     return presign['url'] as String;
   }
 
+  /// Runs a request and turns a transport failure into a message that names the
+  /// address that could not be reached. Without this the browser's bare
+  /// "ClientException: Failed to fetch" reaches the sign-in form, which says
+  /// nothing about the backend being down.
+  Future<http.Response> _send(Future<http.Response> Function() request) async {
+    try {
+      return await request();
+    } on http.ClientException catch (e) {
+      debugPrint('ApiService network error: $e');
+      throw Exception(AppConfig.unreachableMessage);
+    }
+  }
+
   Map<String, dynamic> _parseResponseMap(http.Response response, {String defaultError = 'Request failed'}) {
     try {
       final decoded = json.decode(response.body);
@@ -274,17 +287,19 @@ class ApiService {
     required String username,
     required String password,
   }) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/auth/register'),
-      headers: _headers,
-      body: json.encode({
-        'operatorName': operatorName,
-        'ownerName': ownerName,
-        'phone': phone,
-        'email': email,
-        'username': username,
-        'password': password,
-      }),
+    final response = await _send(
+      () => http.post(
+        Uri.parse('$baseUrl/auth/register'),
+        headers: _headers,
+        body: json.encode({
+          'operatorName': operatorName,
+          'ownerName': ownerName,
+          'phone': phone,
+          'email': email,
+          'username': username,
+          'password': password,
+        }),
+      ),
     );
 
     final body = _parseResponseMap(response, defaultError: 'Registration failed');
@@ -299,10 +314,12 @@ class ApiService {
     required String username,
     required String password,
   }) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/auth/login'),
-      headers: _headers,
-      body: json.encode({'username': username, 'password': password}),
+    final response = await _send(
+      () => http.post(
+        Uri.parse('$baseUrl/auth/login'),
+        headers: _headers,
+        body: json.encode({'username': username, 'password': password}),
+      ),
     );
     final body = _parseResponseMap(response, defaultError: 'Invalid username or password');
     if (response.statusCode != 200) {

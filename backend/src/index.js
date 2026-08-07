@@ -1,4 +1,5 @@
-import "dotenv/config";
+// Must stay first: it fills process.env before any module that reads it.
+import "./lib/env.js";
 import express from "express";
 import cors from "cors";
 import path from "path";
@@ -55,6 +56,16 @@ app.use("/api/uploads", uploadsRouter);
 // 404 fallback
 app.use((req, res) => {
   res.status(404).json({ error: "Not found" });
+});
+
+// Anything a route throws has to reach the client as JSON. Express's built-in
+// handler answers with an HTML stack page, which the apps cannot parse — so a
+// real error arrives at the sign-in form as a bare "Server error (500)".
+app.use((err, req, res, next) => {
+  console.error("Unhandled API error:", err);
+  if (res.headersSent) return next(err);
+  const status = err.status || err.statusCode || 500;
+  res.status(status).json({ error: err.message || "Internal server error" });
 });
 
 if (!process.env.VERCEL) {

@@ -7,6 +7,9 @@
     "build": "bash scripts/build.sh",
     "start": "node backend/src/index.js"
   },
+  "engines": {
+    "node": "22.x"
+  },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1104.0",
     "@aws-sdk/s3-request-presigner": "^3.1104.0",
