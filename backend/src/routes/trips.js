@@ -199,51 +199,45 @@ router.get("/fleet-status", async (req, res) => {
   /// spreading the trip, so a booking's customer name and phone can never leak
   /// into this public feed.
   const row = (vehicle, trip) => ({
-    id: trip ? trip.id : -vehicle.id,
-    tripId: trip ? trip.id : null,
+    id: trip.id,
+    tripId: trip.id,
     operatorName: vehicle.operatorName,
     vehicleId: vehicle.id,
     vehicleName: vehicle.name,
     vehicleNumber: vehicle.vehicleNumber,
     vehicleType: vehicle.type,
     seats: vehicle.capacity,
-    place: trip ? trip.place : "",
-    departureDate: trip ? trip.departureDate : "",
-    arrivalDate: trip ? trip.arrivalDate : "",
-    durationDays: trip ? trip.durationDays : 0,
-    imageUrl:
-      trip && trip.imageUrl
-        ? trip.imageUrl
-        : (vehicle.imageUrls && vehicle.imageUrls[0]) || "",
-    note: trip ? trip.note : "",
-    status: trip ? trip.status : "Available",
+    place: trip.place,
+    departureDate: trip.departureDate,
+    arrivalDate: trip.arrivalDate,
+    durationDays: trip.durationDays,
+    imageUrl: trip.imageUrl || (vehicle.imageUrls && vehicle.imageUrls[0]) || "",
+    note: trip.note,
+    status: trip.status,
     busListed: true
   });
 
-  // An agency can run a bus on several trips, so every one of them gets its own
-  // tile. Returning only the current trip per vehicle is what made a second
-  // posted status silently never appear in the app.
+  // Only trips an agency has actually posted become a status. A listed bus with
+  // nothing scheduled used to emit an "Available" tile, which filled the bar
+  // with every bus on the platform whether or not it had anything to say.
+  //
+  // An agency can run one bus on several trips, so each of those gets its own
+  // tile.
   const rows = allVehicles()
     .filter(isVehiclePubliclyListed)
-    .flatMap((vehicle) => {
-      const mine = trips
+    .flatMap((vehicle) =>
+      trips
         .filter((t) => Number(t.vehicleId) === Number(vehicle.id))
         .map(decorate)
         .filter((t) => t.status !== "Completed")
-        .sort((a, b) => String(a.departureDate).localeCompare(String(b.departureDate)));
+        // Customer bookings keep the bus busy but are not advertised: a tile
+        // per booking would publish on which dates a stranger booked it.
+        .filter((t) => t.kind !== "booking")
+        .sort((a, b) => String(a.departureDate).localeCompare(String(b.departureDate)))
+        .map((t) => row(vehicle, t))
+    );
 
-      // Customer bookings mark the bus as busy but are not advertised as
-      // trips — one tile per booking would publish how often, and on which
-      // dates, a stranger has booked it.
-      const posted = mine.filter((t) => t.kind !== "booking");
-      if (posted.length) return posted.map((t) => row(vehicle, t));
-
-      const runningBooking = mine.find((t) => t.status === "On Trip");
-      const idle = row(vehicle, null);
-      return [runningBooking ? { ...idle, status: "On Trip" } : idle];
-    });
-
-  const rank = { "On Trip": 0, Upcoming: 1, Available: 2 };
+  const rank = { "On Trip": 0, Upcoming: 1 };
   rows.sort((a, b) => {
     const byStatus = (rank[a.status] ?? 3) - (rank[b.status] ?? 3);
     if (byStatus !== 0) return byStatus;

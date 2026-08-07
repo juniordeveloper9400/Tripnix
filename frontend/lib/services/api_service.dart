@@ -93,8 +93,9 @@ class ApiService {
     }
   }
 
-  /// Live status of every publicly listed bus, for the bar at the top of the
-  /// showcase. Buses with no trip posted come back as 'Available'.
+  /// The trip statuses agencies have posted, for the bar at the top of the
+  /// showcase. A listed bus with nothing scheduled contributes nothing — only
+  /// a posted trip becomes a status.
   Future<List<AgencyTrip>> fetchTrips() async {
     final response = await http.get(Uri.parse('$baseUrl/trips/fleet-status'));
     if (response.statusCode != 200) {

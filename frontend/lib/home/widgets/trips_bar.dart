@@ -43,20 +43,32 @@ class TripsBar extends StatelessWidget {
       );
     }
 
-    // The signed-in agency's own tile always sits first, with the + to post a
-    // new status. Everyone else's trips follow.
+    // The signed-in agency's own statuses live *inside* the first tile rather
+    // than as separate tiles of their own — the agency sees its own posts on
+    // its own card, the way a story ring works, and the rest of the row is
+    // other agencies.
+    final own = AgencySession.instance.operatorName.trim().toLowerCase();
+    final mine = own.isEmpty
+        ? const <AgencyTrip>[]
+        : trips
+              .where((t) => t.operatorName.trim().toLowerCase() == own)
+              .toList();
+    final others = trips
+        .where((t) => t.operatorName.trim().toLowerCase() != own)
+        .toList();
+
     return SizedBox(
       height: 180,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        itemCount: trips.length + 1,
+        itemCount: others.length + 1,
         separatorBuilder: (context, index) => const SizedBox(width: 12),
         itemBuilder: (context, index) {
           if (index == 0) {
-            return _AddStatusTile(onAdded: onTripAdded);
+            return _AddStatusTile(onAdded: onTripAdded, mine: mine);
           }
-          final trip = trips[index - 1];
+          final trip = others[index - 1];
           return _TripTile(
             trip: trip,
             onTap: () => showTripDetailSheet(context, trip),
@@ -67,18 +79,143 @@ class TripsBar extends StatelessWidget {
   }
 }
 
-/// The viewing agency's own profile, first in the row, with a prominent + badge to post a new
-/// trip status.
+/// The viewing agency's own tile, first in the row.
+///
+/// It carries the agency's own posted statuses as well as the + to post a new
+/// one: their trips are shown *here* rather than as separate tiles further
+/// along the row, so the card reads as "your agency" the way a story ring does.
 class _AddStatusTile extends StatelessWidget {
-  const _AddStatusTile({required this.onAdded});
+  const _AddStatusTile({required this.onAdded, required this.mine});
 
   final Future<void> Function() onAdded;
+
+  /// This agency's own live statuses, most current first. Empty until they
+  /// post one from the admin portal or the + below.
+  final List<AgencyTrip> mine;
+
+  /// The status the tile shows. The list arrives ranked by the API, so the
+  /// first is the one running now, or the next one due.
+  AgencyTrip? get _featured => mine.isEmpty ? null : mine.first;
 
   Future<void> _open(BuildContext context) async {
     final posted = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => const AddTripStatusScreen()),
     );
     if (posted == true) await onAdded();
+  }
+
+  /// Tapping the card opens what the agency has posted; with nothing posted it
+  /// goes straight to the form. More than one opens the list, so a second and
+  /// third status stay reachable from the single tile.
+  void _openOwn(BuildContext context) {
+    if (mine.isEmpty) {
+      _open(context);
+      return;
+    }
+    if (mine.length == 1) {
+      showTripDetailSheet(context, mine.first);
+      return;
+    }
+    _showOwnStatusList(context);
+  }
+
+  void _showOwnStatusList(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 12),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.black12,
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Your trip statuses',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '${mine.length}',
+                    style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                  ),
+                ],
+              ),
+            ),
+            Flexible(
+              child: ListView.separated(
+                shrinkWrap: true,
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                itemCount: mine.length,
+                separatorBuilder: (_, _) => const Divider(height: 1),
+                itemBuilder: (_, index) {
+                  final trip = mine[index];
+                  return ListTile(
+                    leading: ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: SizedBox(
+                        width: 52,
+                        height: 44,
+                        child: _buildTileImage(trip.imageUrl),
+                      ),
+                    ),
+                    title: Text(
+                      trip.place,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    subtitle: Text(
+                      '${trip.departureLabel} → ${trip.arrivalLabel}',
+                      style: const TextStyle(fontSize: 11.5),
+                    ),
+                    trailing: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: trip.statusColor,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        trip.status.toUpperCase(),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 8.5,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    onTap: () {
+                      Navigator.of(sheetContext).pop();
+                      showTripDetailSheet(context, trip);
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -95,8 +232,10 @@ class _AddStatusTile extends StatelessWidget {
         .map((w) => w[0].toUpperCase())
         .join();
 
+    final featured = _featured;
+
     return GestureDetector(
-      onTap: () => _open(context),
+      onTap: () => _openOwn(context),
       child: SizedBox(
         width: 148,
         child: Column(
@@ -109,6 +248,9 @@ class _AddStatusTile extends StatelessWidget {
               child: Stack(
                 clipBehavior: Clip.none,
                 children: [
+                  if (featured != null)
+                    _OwnStatusCard(trip: featured, extraCount: mine.length - 1)
+                  else
                   Container(
                     height: 94,
                     width: 148,
@@ -166,28 +308,34 @@ class _AddStatusTile extends StatelessWidget {
                       ],
                     ),
                   ),
+                  // Its own tap target: with a status already showing behind
+                  // it, tapping the card opens that status, so the + has to
+                  // stay the way to post another.
                   Positioned(
                     right: 6,
                     bottom: 6,
-                    child: Container(
-                      width: 26,
-                      height: 26,
-                      decoration: BoxDecoration(
-                        color: AppColors.red,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 2),
-                        boxShadow: const [
-                          BoxShadow(
-                            color: Colors.black26,
-                            blurRadius: 4,
-                            offset: Offset(0, 1),
-                          )
-                        ],
-                      ),
-                      child: const Icon(
-                        Icons.add,
-                        color: Colors.white,
-                        size: 16,
+                    child: GestureDetector(
+                      onTap: () => _open(context),
+                      child: Container(
+                        width: 26,
+                        height: 26,
+                        decoration: BoxDecoration(
+                          color: AppColors.red,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Colors.black26,
+                              blurRadius: 4,
+                              offset: Offset(0, 1),
+                            )
+                          ],
+                        ),
+                        child: const Icon(
+                          Icons.add,
+                          color: Colors.white,
+                          size: 16,
+                        ),
                       ),
                     ),
                   ),
@@ -211,13 +359,17 @@ class _AddStatusTile extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '+ Post a trip status',
+                  featured == null
+                      ? '+ Post a trip status'
+                      : mine.length > 1
+                      ? '${featured.place} · +${mine.length - 1} more'
+                      : featured.place,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 10.5,
                     fontWeight: FontWeight.w600,
-                    color: AppColors.red,
+                    color: featured == null ? AppColors.red : Colors.grey[600],
                   ),
                 ),
               ],
@@ -375,27 +527,30 @@ class _TripTile extends StatelessWidget {
     );
   }
 
-  Widget _buildTileImage(String url) {
-    if (url.isEmpty) return const _TripFallback();
-    if (url.startsWith('data:image') || url.contains(';base64,')) {
-      try {
-        final base64Data = url.split(',').last;
-        final bytes = base64Decode(base64Data);
-        return Image.memory(
-          bytes,
-          fit: BoxFit.cover,
-          errorBuilder: (context, error, stack) => const _TripFallback(),
-        );
-      } catch (_) {
-        return const _TripFallback();
-      }
+}
+
+/// The photo behind a status tile. Shared by the agency's own tile and every
+/// other agency's, so both render an uploaded image the same way.
+Widget _buildTileImage(String url) {
+  if (url.isEmpty) return const _TripFallback();
+  if (url.startsWith('data:image') || url.contains(';base64,')) {
+    try {
+      final base64Data = url.split(',').last;
+      final bytes = base64Decode(base64Data);
+      return Image.memory(
+        bytes,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stack) => const _TripFallback(),
+      );
+    } catch (_) {
+      return const _TripFallback();
     }
-    return Image.network(
-      url,
-      fit: BoxFit.cover,
-      errorBuilder: (context, error, stack) => const _TripFallback(),
-    );
   }
+  return Image.network(
+    url,
+    fit: BoxFit.cover,
+    errorBuilder: (context, error, stack) => const _TripFallback(),
+  );
 }
 
 class _TripFallback extends StatelessWidget {
@@ -413,6 +568,126 @@ class _TripFallback extends StatelessWidget {
       ),
       child: Center(
         child: Icon(Icons.landscape_outlined, color: Colors.white54, size: 26),
+      ),
+    );
+  }
+}
+
+/// The agency's own status, drawn inside its tile.
+///
+/// Deliberately mirrors [_TripTile]'s look — same photo, scrim, status pill and
+/// vehicle line — so the agency's own post reads as the same kind of thing as
+/// everyone else's, just on its own card with the + still on it.
+class _OwnStatusCard extends StatelessWidget {
+  const _OwnStatusCard({required this.trip, required this.extraCount});
+
+  final AgencyTrip trip;
+
+  /// How many further statuses this agency has behind this one.
+  final int extraCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 94,
+      width: 148,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.red, width: 2),
+      ),
+      padding: const EdgeInsets.all(2.5),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            _buildTileImage(trip.imageUrl),
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.transparent, Colors.black87],
+                  stops: [0.45, 1.0],
+                ),
+              ),
+            ),
+            Positioned(
+              top: 6,
+              left: 6,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 7,
+                  vertical: 3,
+                ),
+                decoration: BoxDecoration(
+                  color: trip.statusColor,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  trip.status.toUpperCase(),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 8.5,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.4,
+                  ),
+                ),
+              ),
+            ),
+            // Only shown when there is something more to see, so the tile does
+            // not imply hidden statuses that are not there.
+            if (extraCount > 0)
+              Positioned(
+                top: 6,
+                right: 6,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '+$extraCount',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ),
+            Positioned(
+              // Clear of the + badge in the bottom-right corner.
+              left: 8,
+              right: 38,
+              bottom: 7,
+              child: Row(
+                children: [
+                  Icon(trip.vehicleIcon, size: 13, color: Colors.white70),
+                  const SizedBox(width: 5),
+                  Expanded(
+                    child: Text(
+                      trip.vehicleNumber.isEmpty
+                          ? trip.vehicleName
+                          : trip.vehicleNumber,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
