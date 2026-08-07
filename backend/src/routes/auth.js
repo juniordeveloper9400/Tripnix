@@ -2,6 +2,7 @@ import { Router } from "express";
 import {
   dbRef,
   databaseConfigured,
+  authConfigured,
   configReport,
   describeDatabaseError,
   snapshotToArray,
@@ -20,11 +21,26 @@ const COLLECTION = "agencies";
 const SUPER_ADMIN_USERNAME = process.env.SUPER_ADMIN_USERNAME || "superadmin";
 const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD || "";
 
-// In-memory store when Firebase is not configured locally
-const memoryAgencies = new Map();
-
 function agencies() {
-  return databaseConfigured ? dbRef(COLLECTION) : null;
+  return dbRef(COLLECTION);
+}
+
+/// Agency accounts exist only in Firebase, so every route here depends on it.
+///
+/// This used to fall back to an in-memory store, which meant a deployment
+/// missing its credentials would invent an account for any username and
+/// password and answer 200 — a broken deploy was indistinguishable from a
+/// working one, and the sign-in was wide open to anyone. Refusing loudly is the
+/// only answer that cannot be mistaken for success.
+function firebaseUnavailable(res) {
+  if (databaseConfigured && authConfigured) return false;
+  const cfg = configReport();
+  res.status(503).json({
+    error:
+      "Accounts are unavailable: this server has no Firebase configuration. " +
+      `Missing ${cfg.missing.join(", ")}. See /api/auth/health for details.`
+  });
+  return true;
 }
 
 function docIdFor(username) {
@@ -79,104 +95,69 @@ async function createAgency({
   const id = docIdFor(username);
   const operatorLower = String(operatorName).trim().toLowerCase();
 
-  if (databaseConfigured) {
-    const existing = await agencies().child(id).get();
-    if (existing.exists()) {
-      const err = new Error("That username is already taken");
-      err.status = 409;
-      throw err;
-    }
+  const existing = await agencies().child(id).get();
+  if (existing.exists()) {
+    const err = new Error("That username is already taken");
+    err.status = 409;
+    throw err;
+  }
 
-    // Needs ".indexOn": "operatorNameLower" on /agencies in the database rules,
-    // otherwise the server sorts the whole node in memory on every signup.
-    const nameTaken = await agencies()
-      .orderByChild("operatorNameLower")
-      .equalTo(operatorLower)
-      .limitToFirst(1)
-      .get();
-    if (nameTaken.exists()) {
-      const err = new Error("That travel agency is already registered");
-      err.status = 409;
-      throw err;
-    }
+  // Needs ".indexOn": "operatorNameLower" on /agencies in the database rules,
+  // otherwise the server sorts the whole node in memory on every signup.
+  const nameTaken = await agencies()
+    .orderByChild("operatorNameLower")
+    .equalTo(operatorLower)
+    .limitToFirst(1)
+    .get();
+  if (nameTaken.exists()) {
+    const err = new Error("That travel agency is already registered");
+    err.status = 409;
+    throw err;
+  }
 
-    let uid;
-    try {
-      uid = await createAuthUser({
-        username: id,
-        password,
-        displayName: operatorName
-      });
-    } catch (e) {
-      if (e?.code === "auth/email-already-exists") {
-        const err = new Error("That username is already taken");
-        err.status = 409;
-        throw err;
-      }
-      if (e?.code === "auth/invalid-password") {
-        const err = new Error("Password must be at least 6 characters");
-        err.status = 400;
-        throw err;
-      }
-      throw e;
-    }
-
-    const record = {
-      uid,
-      username: id,
-      loginEmail: loginEmailFor(id),
-      operatorName: String(operatorName).trim(),
-      operatorNameLower: operatorLower,
-      ownerName: (ownerName || "").trim(),
-      phone: (phone || "").trim(),
-      email: (email || "").trim(),
-      role: role || "admin",
-      registeredAt: new Date().toISOString()
-    };
-
-    try {
-      await agencies().child(id).set(record);
-    } catch (e) {
-      await deleteAuthUser(uid);
-      throw e;
-    }
-
-    autoActivateAgency(record.operatorName);
-    return record;
-  } else {
-    // In-memory fallback mode
-    if (memoryAgencies.has(id)) {
-      const err = new Error("That username is already taken");
-      err.status = 409;
-      throw err;
-    }
-
-    for (const [, agency] of memoryAgencies.entries()) {
-      if (agency.operatorNameLower === operatorLower) {
-        const err = new Error("That travel agency is already registered");
-        err.status = 409;
-        throw err;
-      }
-    }
-
-    const record = {
-      uid: `mem-${id}`,
+  let uid;
+  try {
+    uid = await createAuthUser({
       username: id,
       password,
-      loginEmail: loginEmailFor(id),
-      operatorName: String(operatorName).trim(),
-      operatorNameLower: operatorLower,
-      ownerName: (ownerName || "").trim(),
-      phone: (phone || "").trim(),
-      email: (email || "").trim(),
-      role: role || "admin",
-      registeredAt: new Date().toISOString()
-    };
-
-    memoryAgencies.set(id, record);
-    autoActivateAgency(record.operatorName);
-    return record;
+      displayName: operatorName
+    });
+  } catch (e) {
+    if (e?.code === "auth/email-already-exists") {
+      const err = new Error("That username is already taken");
+      err.status = 409;
+      throw err;
+    }
+    if (e?.code === "auth/invalid-password") {
+      const err = new Error("Password must be at least 6 characters");
+      err.status = 400;
+      throw err;
+    }
+    throw e;
   }
+
+  const record = {
+    uid,
+    username: id,
+    loginEmail: loginEmailFor(id),
+    operatorName: String(operatorName).trim(),
+    operatorNameLower: operatorLower,
+    ownerName: (ownerName || "").trim(),
+    phone: (phone || "").trim(),
+    email: (email || "").trim(),
+    role: role || "admin",
+    registeredAt: new Date().toISOString()
+  };
+
+  try {
+    await agencies().child(id).set(record);
+  } catch (e) {
+    await deleteAuthUser(uid);
+    throw e;
+  }
+
+  autoActivateAgency(record.operatorName);
+  return record;
 }
 
 let seedChecked = false;
@@ -206,55 +187,28 @@ router.post("/login", async (req, res) => {
     return res.status(400).json({ error: "Username and password required" });
   }
 
+  if (firebaseUnavailable(res)) return;
+
   const id = docIdFor(username);
 
-  // The database holds the agency profiles, so whenever it is configured it is the
-  // only source of truth — never quietly fall back to the memory store, or a
-  // half-configured deployment would accept logins the real database rejects.
-  if (databaseConfigured) {
-    try {
-      await ensureSuperAdmin();
+  try {
+    await ensureSuperAdmin();
 
-      const credentials = await verifyPassword(username, password);
-      if (!credentials) {
-        return res.status(401).json({ error: "Invalid username or password" });
-      }
-
-      const doc = await agencies().child(id).get();
-      if (!doc.exists()) {
-        return res.status(404).json({ error: "No agency profile for this login" });
-      }
-
-      autoActivateAgency(doc.val().operatorName);
-      return res.json(publicProfile(doc));
-    } catch (err) {
-      return sendError(res, err, "Login failed");
+    const credentials = await verifyPassword(username, password);
+    if (!credentials) {
+      return res.status(401).json({ error: "Invalid username or password" });
     }
-  }
 
-  // Fallback mode for hosted link: accounts live in memory.
-  let agency = memoryAgencies.get(id);
-  if (!agency) {
-    agency = {
-      uid: `mem-${id}`,
-      username: id,
-      password,
-      loginEmail: loginEmailFor(id),
-      operatorName: String(username).trim(),
-      operatorNameLower: id,
-      ownerName: String(username).trim(),
-      phone: "9400525063",
-      email: `${id}@agency.tripnix.app`,
-      role: "admin",
-      registeredAt: new Date().toISOString()
-    };
-    memoryAgencies.set(id, agency);
-  } else if (agency.password && agency.password !== password) {
-    return res.status(401).json({ error: "Invalid username or password" });
-  }
+    const doc = await agencies().child(id).get();
+    if (!doc.exists()) {
+      return res.status(404).json({ error: "No agency profile for this login" });
+    }
 
-  autoActivateAgency(agency.operatorName);
-  return res.json(publicProfileData(agency));
+    autoActivateAgency(doc.val().operatorName);
+    return res.json(publicProfile(doc));
+  } catch (err) {
+    return sendError(res, err, "Login failed");
+  }
 });
 
 // GET /api/auth/health - what is actually wired up, for diagnosing sign-in.
@@ -281,7 +235,7 @@ router.get("/health", async (req, res) => {
     ...report,
     databaseReachable,
     databaseError,
-    mode: report.databaseConfigured ? "firebase" : "in-memory-fallback",
+    mode: report.databaseConfigured ? "firebase" : "unconfigured",
     accountsPersisted: ok,
     registrationWorks: ok,
     signInWorks: ok
@@ -297,6 +251,8 @@ router.post("/register", async (req, res) => {
       .status(400)
       .json({ error: "Travel agency name, username and password are required" });
   }
+
+  if (firebaseUnavailable(res)) return;
 
   try {
     await ensureSuperAdmin();
@@ -316,12 +272,9 @@ router.post("/register", async (req, res) => {
       operatorName: record.operatorName,
       phone: record.phone,
       role: record.role,
-      // Without Firebase the account only exists in this process, so say so
-      // rather than promising a sign-in that will fail later.
-      persisted: databaseConfigured,
-      nextStep: databaseConfigured
-        ? "Use this same username and password to sign in to the admin portal."
-        : "WARNING: the backend has no Firebase credentials, so this account was NOT saved and will disappear when the server restarts."
+      persisted: true,
+      nextStep:
+        "Use this same username and password to sign in to the admin portal."
     });
   } catch (err) {
     sendError(res, err, "Registration failed");
@@ -335,67 +288,44 @@ router.get("/agency-contact", async (req, res) => {
     return res.status(400).json({ error: "operatorName query param is required" });
   }
 
+  if (firebaseUnavailable(res)) return;
+
   const targetLower = String(operatorName).trim().toLowerCase();
 
-  if (databaseConfigured) {
-    try {
-      const snap = await agencies()
-        .orderByChild("operatorNameLower")
-        .equalTo(targetLower)
-        .limitToFirst(1)
-        .get();
+  try {
+    const snap = await agencies()
+      .orderByChild("operatorNameLower")
+      .equalTo(targetLower)
+      .limitToFirst(1)
+      .get();
 
-      if (!snap.exists()) return res.status(404).json({ error: "Agency not found" });
+    if (!snap.exists()) return res.status(404).json({ error: "Agency not found" });
 
-      const a = snapshotToArray(snap)[0];
-      return res.json({
-        operatorName: a.operatorName,
-        ownerName: a.ownerName || "",
-        phone: a.phone || "",
-        email: a.email || ""
-      });
-    } catch (err) {
-      return sendError(res, err, "Contact lookup failed");
-    }
+    const a = snapshotToArray(snap)[0];
+    return res.json({
+      operatorName: a.operatorName,
+      ownerName: a.ownerName || "",
+      phone: a.phone || "",
+      email: a.email || ""
+    });
+  } catch (err) {
+    return sendError(res, err, "Contact lookup failed");
   }
-
-  for (const agency of memoryAgencies.values()) {
-    if (agency.operatorNameLower === targetLower) {
-      return res.json({
-        operatorName: agency.operatorName,
-        ownerName: agency.ownerName || "",
-        phone: agency.phone || "",
-        email: agency.email || ""
-      });
-    }
-  }
-
-  return res.json({
-    operatorName: String(operatorName).trim(),
-    ownerName: "",
-    phone: "",
-    email: ""
-  });
 });
 
 // GET /api/auth/admins
 router.get("/admins", async (req, res) => {
-  if (databaseConfigured) {
-    try {
-      const snap = await agencies().get();
-      const rows = snapshotToArray(snap)
-        .map(publicProfileData)
-        .sort((a, b) => String(a.registeredAt).localeCompare(String(b.registeredAt)));
-      return res.json(rows);
-    } catch (err) {
-      return sendError(res, err, "Admin list failed");
-    }
-  }
+  if (firebaseUnavailable(res)) return;
 
-  const rows = Array.from(memoryAgencies.values())
-    .map(publicProfileData)
-    .sort((a, b) => String(a.registeredAt).localeCompare(String(b.registeredAt)));
-  res.json(rows);
+  try {
+    const snap = await agencies().get();
+    const rows = snapshotToArray(snap)
+      .map(publicProfileData)
+      .sort((a, b) => String(a.registeredAt).localeCompare(String(b.registeredAt)));
+    return res.json(rows);
+  } catch (err) {
+    return sendError(res, err, "Admin list failed");
+  }
 });
 
 // POST /api/auth/admins
@@ -407,6 +337,8 @@ router.post("/admins", async (req, res) => {
       .status(400)
       .json({ error: "Username, password, and operatorName are required" });
   }
+
+  if (firebaseUnavailable(res)) return;
 
   try {
     const record = await createAgency({
@@ -433,54 +365,38 @@ router.post("/admins", async (req, res) => {
 
 // DELETE /api/auth/admins/:id
 router.delete("/admins/:id", async (req, res) => {
+  if (firebaseUnavailable(res)) return;
+
   const id = docIdFor(req.params.id);
 
-  if (databaseConfigured) {
-    try {
-      const doc = await agencies().child(id).get();
-      if (!doc.exists()) return res.status(404).json({ error: "Admin not found" });
+  try {
+    const doc = await agencies().child(id).get();
+    if (!doc.exists()) return res.status(404).json({ error: "Admin not found" });
 
-      const data = doc.val();
-      if (data.role === "superadmin") {
-        return res.status(403).json({ error: "Cannot delete Super Admin account" });
-      }
-
-      await deleteAuthUser(data.uid);
-      await agencies().child(id).remove();
-      return res.status(204).end();
-    } catch (err) {
-      return sendError(res, err, "Delete admin failed");
+    const data = doc.val();
+    if (data.role === "superadmin") {
+      return res.status(403).json({ error: "Cannot delete Super Admin account" });
     }
-  }
 
-  const data = memoryAgencies.get(id);
-  if (!data) return res.status(404).json({ error: "Admin not found" });
-  if (data.role === "superadmin") {
-    return res.status(403).json({ error: "Cannot delete Super Admin account" });
+    await deleteAuthUser(data.uid);
+    await agencies().child(id).remove();
+    return res.status(204).end();
+  } catch (err) {
+    return sendError(res, err, "Delete admin failed");
   }
-
-  memoryAgencies.delete(id);
-  res.status(204).end();
 });
 
 /// Used by other routes that need to confirm an agency exists.
 export async function findAgencyByOperatorName(operatorName) {
-  const targetLower = String(operatorName).trim().toLowerCase();
-  if (databaseConfigured) {
-    const snap = await agencies()
-      .orderByChild("operatorNameLower")
-      .equalTo(targetLower)
-      .limitToFirst(1)
-      .get();
-    return snap.exists() ? snapshotToArray(snap)[0] : null;
-  }
+  if (!databaseConfigured) return null;
 
-  for (const agency of memoryAgencies.values()) {
-    if (agency.operatorNameLower === targetLower) {
-      return agency;
-    }
-  }
-  return null;
+  const targetLower = String(operatorName).trim().toLowerCase();
+  const snap = await agencies()
+    .orderByChild("operatorNameLower")
+    .equalTo(targetLower)
+    .limitToFirst(1)
+    .get();
+  return snap.exists() ? snapshotToArray(snap)[0] : null;
 }
 
 export default router;

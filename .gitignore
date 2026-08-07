@@ -18,3 +18,9 @@ build/
 
 .DS_Store
 *.log
+
+# Appended by `vercel link`. .vercel and .env* are already covered above, and a
+# bare `.env*` here would override the `!.env.example` negation, so the example
+# file stays listed explicitly.
+.env.local
+!**/.env.example
