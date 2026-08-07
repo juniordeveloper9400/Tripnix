@@ -1,7 +1,13 @@
 import { Router } from "express";
 import { findVehicle, allVehicles, refreshVehiclesFromDb } from "./vehicles.js";
 import { isVehiclePubliclyListed } from "./subscriptions.js";
-import { dbRef, databaseConfigured, snapshotToArray } from "../lib/firebase.js";
+import {
+  dbRef,
+  databaseConfigured,
+  snapshotToArray,
+  allocateId,
+  describeDatabaseError
+} from "../lib/firebase.js";
 
 const router = Router();
 
@@ -14,6 +20,21 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 function tripsRef() {
   return databaseConfigured ? dbRef("trips") : null;
+}
+
+/// The highest trip id this process has seen.
+function highestKnownId() {
+  return trips.reduce((max, t) => Math.max(max, Number(t.id) || 0), nextId - 1);
+}
+
+/// Reserves an id for a new trip through the shared database counter, so two
+/// serverless instances cannot hand out the same one and overwrite each
+/// other's trips.
+async function reserveTripId() {
+  if (!databaseConfigured) return nextId++;
+  const id = await allocateId("trips", highestKnownId());
+  if (id >= nextId) nextId = id + 1;
+  return id;
 }
 
 /// Midnight today, so a trip departing today counts as running.
@@ -174,42 +195,62 @@ router.get("/fleet-status", async (req, res) => {
     }
   }
 
+  /// One tile in the app's status bar. Built field by field rather than by
+  /// spreading the trip, so a booking's customer name and phone can never leak
+  /// into this public feed.
+  const row = (vehicle, trip) => ({
+    id: trip ? trip.id : -vehicle.id,
+    tripId: trip ? trip.id : null,
+    operatorName: vehicle.operatorName,
+    vehicleId: vehicle.id,
+    vehicleName: vehicle.name,
+    vehicleNumber: vehicle.vehicleNumber,
+    vehicleType: vehicle.type,
+    seats: vehicle.capacity,
+    place: trip ? trip.place : "",
+    departureDate: trip ? trip.departureDate : "",
+    arrivalDate: trip ? trip.arrivalDate : "",
+    durationDays: trip ? trip.durationDays : 0,
+    imageUrl:
+      trip && trip.imageUrl
+        ? trip.imageUrl
+        : (vehicle.imageUrls && vehicle.imageUrls[0]) || "",
+    note: trip ? trip.note : "",
+    status: trip ? trip.status : "Available",
+    busListed: true
+  });
+
+  // An agency can run a bus on several trips, so every one of them gets its own
+  // tile. Returning only the current trip per vehicle is what made a second
+  // posted status silently never appear in the app.
   const rows = allVehicles()
     .filter(isVehiclePubliclyListed)
-    .map((vehicle) => {
+    .flatMap((vehicle) => {
       const mine = trips
-        .filter((t) => t.vehicleId === vehicle.id)
+        .filter((t) => Number(t.vehicleId) === Number(vehicle.id))
         .map(decorate)
         .filter((t) => t.status !== "Completed")
         .sort((a, b) => String(a.departureDate).localeCompare(String(b.departureDate)));
 
-      const running = mine.find((t) => t.status === "On Trip");
-      const current = running || mine[0] || null;
+      // Customer bookings mark the bus as busy but are not advertised as
+      // trips — one tile per booking would publish how often, and on which
+      // dates, a stranger has booked it.
+      const posted = mine.filter((t) => t.kind !== "booking");
+      if (posted.length) return posted.map((t) => row(vehicle, t));
 
-      return {
-        id: current ? current.id : -vehicle.id,
-        tripId: current ? current.id : null,
-        operatorName: vehicle.operatorName,
-        vehicleId: vehicle.id,
-        vehicleName: vehicle.name,
-        vehicleNumber: vehicle.vehicleNumber,
-        vehicleType: vehicle.type,
-        seats: vehicle.capacity,
-        place: current ? current.place : "",
-        departureDate: current ? current.departureDate : "",
-        arrivalDate: current ? current.arrivalDate : "",
-        durationDays: current ? current.durationDays : 0,
-        imageUrl: current && current.imageUrl
-          ? current.imageUrl
-          : (vehicle.imageUrls && vehicle.imageUrls[0]) || "",
-        note: current ? current.note : "",
-        status: current ? current.status : "Available",
-        busListed: true
-      };
+      const runningBooking = mine.find((t) => t.status === "On Trip");
+      const idle = row(vehicle, null);
+      return [runningBooking ? { ...idle, status: "On Trip" } : idle];
     });
 
   const rank = { "On Trip": 0, Upcoming: 1, Available: 2 };
-  rows.sort((a, b) => (rank[a.status] ?? 3) - (rank[b.status] ?? 3));
+  rows.sort((a, b) => {
+    const byStatus = (rank[a.status] ?? 3) - (rank[b.status] ?? 3);
+    if (byStatus !== 0) return byStatus;
+    // Within a status the soonest departure leads, so the bar reads as a
+    // timeline rather than in insertion order.
+    return String(a.departureDate).localeCompare(String(b.departureDate));
+  });
 
   res.json(rows);
 });
@@ -268,8 +309,18 @@ router.post("/", async (req, res) => {
       .json({ error: "Arrival date cannot be before the departure date" });
   }
 
+  let id;
+  try {
+    id = await reserveTripId();
+  } catch (e) {
+    console.error("Trip id allocation error:", e);
+    return res.status(503).json({
+      error: "Could not reserve an id for this trip. Please try again."
+    });
+  }
+
   const trip = {
-    id: nextId++,
+    id,
     operatorName: vehicle.operatorName,
     vehicleId: vehicle.id,
     vehicleName: vehicle.name,
@@ -292,7 +343,15 @@ router.post("/", async (req, res) => {
     try {
       await tripsRef().child(String(trip.id)).set(trip);
     } catch (e) {
+      // Same reason as the vehicle save: reporting "posted" for a trip that
+      // only exists in this instance's memory is how a trip vanishes from the
+      // traveller app an hour later.
       console.error("Database save trip error:", e);
+      trips = trips.filter((t) => t.id !== trip.id);
+      const described = describeDatabaseError(e);
+      return res.status(described?.status || 503).json({
+        error: described?.message || `Could not save the trip: ${e.message}`
+      });
     }
   }
 
@@ -322,8 +381,24 @@ router.delete("/:id", async (req, res) => {
 });
 
 /// Drops a vehicle's trips when the vehicle itself is deleted.
-export function removeTripsForVehicle(vehicleId) {
-  trips = trips.filter((t) => t.vehicleId !== Number(vehicleId));
+///
+/// The stored copies have to go too: dropping them from memory alone left them
+/// in the database, so the next process to load trips brought back a row for a
+/// bus that no longer exists.
+export async function removeTripsForVehicle(vehicleId) {
+  await refreshTripsFromDb();
+
+  const doomed = trips.filter((t) => Number(t.vehicleId) === Number(vehicleId));
+  trips = trips.filter((t) => Number(t.vehicleId) !== Number(vehicleId));
+
+  if (!databaseConfigured) return;
+  for (const trip of doomed) {
+    try {
+      await tripsRef().child(String(trip.id)).remove();
+    } catch (e) {
+      console.error(`Database delete trip ${trip.id} for removed vehicle error:`, e);
+    }
+  }
 }
 
 /// Creates a trip entry when a customer booking is made so it displays on the status bar.
@@ -331,9 +406,12 @@ export function removeTripsForVehicle(vehicleId) {
 /// The traveller's name and phone are kept in dedicated fields rather than
 /// baked into `place` / `note`, because those two are shown publicly — putting
 /// them there published one customer's contact details to every other user.
-export function addTripFromBooking(booking, vehicle) {
+export async function addTripFromBooking(booking, vehicle) {
+  // Shares the same collision-proof counter as a posted trip — a booking that
+  // reused an id would overwrite whatever trip already held it.
+  await refreshTripsFromDb();
   const trip = {
-    id: nextId++,
+    id: await reserveTripId(),
     bookingId: booking.id,
     kind: "booking",
     operatorName: vehicle.operatorName,

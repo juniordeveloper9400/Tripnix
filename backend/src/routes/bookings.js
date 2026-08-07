@@ -63,7 +63,7 @@ router.post("/", async (req, res) => {
   // If vehicle is found, automatically post this booking to fleet status as a trip
   if (vehicle) {
     try {
-      addTripFromBooking(newBooking, vehicle);
+      await addTripFromBooking(newBooking, vehicle);
     } catch (e) {
       console.error("Error adding trip from booking:", e);
     }

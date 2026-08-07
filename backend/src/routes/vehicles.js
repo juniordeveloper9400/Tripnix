@@ -11,7 +11,13 @@ import {
   tripsForVehicle,
   redactTrip
 } from "./trips.js";
-import { dbRef, databaseConfigured, snapshotToArray } from "../lib/firebase.js";
+import {
+  dbRef,
+  databaseConfigured,
+  snapshotToArray,
+  allocateId,
+  describeDatabaseError
+} from "../lib/firebase.js";
 
 const router = Router();
 
@@ -28,6 +34,22 @@ let nextId = 1;
 function rememberId(id) {
   const value = Number(id);
   if (Number.isFinite(value) && value >= nextId) nextId = value + 1;
+}
+
+/// The highest vehicle id this process has seen, so the shared counter is never
+/// asked for an id that is already taken.
+function highestKnownId() {
+  return vehicles.reduce((max, v) => Math.max(max, Number(v.id) || 0), nextId - 1);
+}
+
+/// Reserves an id for a new vehicle. Backed by a database transaction so two
+/// serverless instances can never hand out the same one; falls back to the
+/// local counter only when there is no database to coordinate through.
+async function reserveVehicleId() {
+  if (!databaseConfigured) return nextId++;
+  const id = await allocateId("vehicles", highestKnownId());
+  rememberId(id);
+  return id;
 }
 
 /// Fills in every field a vehicle record is expected to have.
@@ -219,10 +241,19 @@ router.post("/", async (req, res) => {
     return res.status(400).json({ error: "vehicleNumber is required" });
   }
 
-  // `nextId` counts up from whatever this process has loaded, so a process
-  // that has loaded nothing hands out id 1 again and the new bus overwrites
-  // the agency's first one in the database.
+  // The fleet has to be loaded before an id is reserved, or this process has
+  // no idea which ids are already taken.
   await refreshVehiclesFromDb();
+
+  let id;
+  try {
+    id = await reserveVehicleId();
+  } catch (e) {
+    console.error("Vehicle id allocation error:", e);
+    return res.status(503).json({
+      error: "Could not reserve an id for this vehicle. Please try again."
+    });
+  }
 
   const owner = operatorName || "My Travels";
   hasActivePlatformMembership(owner);
@@ -232,7 +263,7 @@ router.post("/", async (req, res) => {
     : [];
 
   const newVehicle = normaliseVehicle({
-    id: nextId++,
+    id,
     name,
     type,
     vehicleNumber: String(vehicleNumber).trim().toUpperCase(),
@@ -257,7 +288,15 @@ router.post("/", async (req, res) => {
     try {
       await vehiclesRef().child(String(newVehicle.id)).set(newVehicle);
     } catch (e) {
+      // A swallowed write is what makes a bus "disappear": the agency is told
+      // the save worked, the record survives only in this instance's memory,
+      // and it is gone the moment that instance is recycled. Report it.
       console.error("Database save vehicle error:", e);
+      vehicles = vehicles.filter((v) => v.id !== newVehicle.id);
+      const described = describeDatabaseError(e);
+      return res.status(described?.status || 503).json({
+        error: described?.message || `Could not save ${newVehicle.name}: ${e.message}`
+      });
     }
   }
 
@@ -318,7 +357,7 @@ router.delete("/:id", async (req, res) => {
   if (!exists) return res.status(404).json({ error: "Vehicle not found" });
 
   vehicles = vehicles.filter((v) => v.id !== id);
-  removeTripsForVehicle(id);
+  await removeTripsForVehicle(id);
 
   if (databaseConfigured) {
     try {

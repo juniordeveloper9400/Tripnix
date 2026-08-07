@@ -174,6 +174,32 @@ export function dbRef(path) {
   return getDatabase(ensureApp()).ref(path);
 }
 
+/// Hands out the next id for a collection, atomically.
+///
+/// Record ids used to come from a per-process counter that started at 1.
+/// Deployed, every serverless instance keeps its own copy, so an instance that
+/// had not loaded the existing records handed out an id already in use and the
+/// new record *overwrote* the old one at that key — an agency's bus or trip
+/// simply vanished. A database transaction is the only counter all instances
+/// agree on.
+///
+/// `minimum` is the highest id the caller already knows about, so an existing
+/// collection is never handed an id that is already taken.
+export async function allocateId(node, minimum = 0) {
+  const floor = Number.isFinite(minimum) ? Math.max(0, minimum) : 0;
+
+  const result = await dbRef(`counters/${node}`).transaction((current) => {
+    const seen = Number.isFinite(current) ? current : 0;
+    return Math.max(seen, floor) + 1;
+  });
+
+  const allocated = Number(result.snapshot.val());
+  if (!Number.isFinite(allocated) || allocated <= 0) {
+    throw new Error(`Could not allocate an id for "${node}"`);
+  }
+  return allocated;
+}
+
 export function auth() {
   return getAuth(ensureApp());
 }
