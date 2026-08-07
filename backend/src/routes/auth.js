@@ -12,7 +12,6 @@ import {
   deleteAuthUser,
   loginEmailFor
 } from "../lib/firebase.js";
-import { autoActivateAgency } from "./subscriptions.js";
 
 const router = Router();
 
@@ -156,7 +155,9 @@ async function createAgency({
     throw e;
   }
 
-  autoActivateAgency(record.operatorName);
+  // A new agency starts with no membership on purpose. Granting one here is
+  // what made the platform fee unenforceable: signing up was enough to be
+  // treated as a paying agency, so nobody ever had to pay it.
   return record;
 }
 
@@ -204,7 +205,6 @@ router.post("/login", async (req, res) => {
       return res.status(404).json({ error: "No agency profile for this login" });
     }
 
-    autoActivateAgency(doc.val().operatorName);
     return res.json(publicProfile(doc));
   } catch (err) {
     return sendError(res, err, "Login failed");

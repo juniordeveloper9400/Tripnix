@@ -339,13 +339,20 @@ class ApiService {
     return json.decode(response.body) as Map<String, dynamic>;
   }
 
-  /// Pays or renews the yearly platform fee. This is a traveller-app action —
-  /// the admin portal only displays the resulting status and expiry.
-  Future<Map<String, dynamic>> payPlatformFee(String operatorName) async {
+  /// Pays or renews the platform fee on the chosen plan. This is a
+  /// traveller-app action — the admin portal only displays the resulting
+  /// status and expiry.
+  ///
+  /// [planId] is 'monthly' or 'yearly'. Omitting it lets the API pick its
+  /// default plan, which is what older builds did.
+  Future<Map<String, dynamic>> payPlatformFee(
+    String operatorName, {
+    String? planId,
+  }) async {
     final response = await http.post(
       Uri.parse('$baseUrl/subscriptions/platform'),
       headers: _headers,
-      body: json.encode({'operatorName': operatorName}),
+      body: json.encode({'operatorName': operatorName, 'planId': ?planId}),
     );
     final body = json.decode(response.body) as Map<String, dynamic>;
     if (response.statusCode != 200 && response.statusCode != 201) {

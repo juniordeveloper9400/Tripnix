@@ -3,7 +3,10 @@ import {
   hasActivePlatformMembership,
   isVehiclePubliclyListed,
   listedAgencies,
-  autoActivateVehicleListing
+  activateVehicleListing,
+  removeListingForVehicle,
+  refreshSubscriptionsFromDb,
+  tierForVehicle
 } from "./subscriptions.js";
 import {
   removeTripsForVehicle,
@@ -123,6 +126,12 @@ function bookedDatesFor(entries) {
 export async function refreshVehiclesFromDb() {
   if (!databaseConfigured) return vehicles;
 
+  // Whether a vehicle is publicly listed, and whether its agency may add one at
+  // all, are decided by the stored subscriptions — so they load first, before
+  // any early return. Loading a vehicle used to *grant* it a listing, which is
+  // why every bus went live whether or not its fee had been paid.
+  await refreshSubscriptionsFromDb();
+
   try {
     const snap = await vehiclesRef().get();
     const stored = snapshotToArray(snap);
@@ -133,13 +142,7 @@ export async function refreshVehiclesFromDb() {
     stored.map(normaliseVehicle).forEach((v) => map.set(v.id, v));
     vehicles = Array.from(map.values());
 
-    // Listings live in memory, so a restart would otherwise leave stored
-    // vehicles unlisted — invisible in both the fleet and the status bar even
-    // though the agency had already added them.
-    vehicles.forEach((v) => {
-      rememberId(v.id);
-      autoActivateVehicleListing(v.operatorName, v.id, v.type);
-    });
+    vehicles.forEach((v) => rememberId(v.id));
   } catch (e) {
     console.error("Database get vehicles error:", e);
   }
@@ -242,8 +245,30 @@ router.post("/", async (req, res) => {
   }
 
   // The fleet has to be loaded before an id is reserved, or this process has
-  // no idea which ids are already taken.
+  // no idea which ids are already taken. Loading it also loads the stored
+  // subscriptions, which the membership check below depends on.
   await refreshVehiclesFromDb();
+
+  const owner = String(operatorName || "").trim();
+  if (!owner) {
+    return res.status(400).json({ error: "operatorName is required" });
+  }
+
+  // The platform fee comes first: an agency that has not paid it cannot put
+  // vehicles on the platform at all.
+  if (!hasActivePlatformMembership(owner)) {
+    return res.status(402).json({
+      error:
+        `${owner} does not have an active platform membership. ` +
+        "Pay the platform fee on the Tripnix site, then add your vehicles.",
+      reason: "platform-membership-required"
+    });
+  }
+
+  const tier = tierForVehicle();
+  if (!tier) {
+    return res.status(400).json({ error: "No vehicle listing plan is configured" });
+  }
 
   let id;
   try {
@@ -254,9 +279,6 @@ router.post("/", async (req, res) => {
       error: "Could not reserve an id for this vehicle. Please try again."
     });
   }
-
-  const owner = operatorName || "My Travels";
-  hasActivePlatformMembership(owner);
 
   const parsedAvailableDates = Array.isArray(availableDates)
     ? availableDates.map((d) => String(d).trim()).filter(Boolean)
@@ -282,7 +304,6 @@ router.post("/", async (req, res) => {
   });
 
   vehicles.push(newVehicle);
-  autoActivateVehicleListing(owner, newVehicle.id, newVehicle.type);
 
   if (databaseConfigured) {
     try {
@@ -300,7 +321,28 @@ router.post("/", async (req, res) => {
     }
   }
 
-  res.status(201).json(newVehicle);
+  // Adding a vehicle buys its first month of listing — this is the charge the
+  // admin portal quotes on the Save button. Until a payment gateway exists,
+  // the add itself stands in for the payment; when one arrives, only this call
+  // moves behind its confirmation.
+  let listing = null;
+  try {
+    listing = await activateVehicleListing(owner, newVehicle);
+  } catch (e) {
+    // The bus is saved but unlisted rather than lost. It stays invisible to
+    // travellers until the fee is settled from the Subscription page, which is
+    // recoverable — deleting the vehicle here would not be.
+    console.error("Vehicle listing activation error:", e);
+    return res.status(201).json({
+      ...newVehicle,
+      listing: null,
+      listingWarning:
+        `${newVehicle.name} was saved, but its ${tier.label} listing fee could not be ` +
+        "recorded, so it is not visible to travellers yet. Renew it from the Subscription page."
+    });
+  }
+
+  res.status(201).json({ ...newVehicle, listing });
 });
 
 // PUT /api/vehicles/:id
@@ -358,6 +400,7 @@ router.delete("/:id", async (req, res) => {
 
   vehicles = vehicles.filter((v) => v.id !== id);
   await removeTripsForVehicle(id);
+  await removeListingForVehicle(id);
 
   if (databaseConfigured) {
     try {

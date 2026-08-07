@@ -1224,7 +1224,9 @@ window.payListingFee = async function(vehicleId) {
   const tier = tierForVehicle(vehicle);
   if (!tier) return alert('❌ No listing tier matches this vehicle.');
 
-  if (!confirm(`Confirm payment of ${money(tier.price)} to list "${vehicle.name}" for 1 year?\n\nTier: ${tier.label} (${tier.seatsLabel})`)) return;
+  // The API bills a listing for one billing period, so the confirmation has to
+  // quote that same period rather than a hardcoded year.
+  if (!confirm(`Confirm payment of ${money(tier.price)} to list "${vehicle.name}" for 1 ${period()}?\n\nTier: ${tier.label} (${tier.seatsLabel})`)) return;
 
   try {
     const res = await fetch(`${API_BASE}/subscriptions/listing`, {
@@ -1753,31 +1755,26 @@ async function handleVehicleFormSubmit(e) {
       return alert(`✅ ${name} updated.`);
     }
 
-    // Adding: buying the listing is what makes the vehicle visible in the app.
-    const vehicleId = data.id;
-    saveBtn.textContent = 'Activating subscription…';
-    const subRes = await fetch(`${API_BASE}/subscriptions/listing`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        operatorName, vehicleId, vehicleName: name, type, capacity
-      })
-    });
-    const subData = await subRes.json().catch(() => null);
-    if (!subRes.ok) {
-      throw new Error(
-        `Vehicle saved, but its subscription failed: ${subData?.error || 'unknown error'}. ` +
+    // Adding: the API buys the listing as part of creating the vehicle and
+    // returns it. Charging it from here as a second request billed the agency
+    // twice for the same bus, and left it saved-but-unlisted whenever the
+    // second request was the one that failed.
+    closeVehicleModal();
+    await loadData();
+
+    if (!data.listing) {
+      return alert(
+        `⚠️ ${name} was saved, but its listing fee could not be charged, so it is ` +
+        `not visible to travellers yet.\n\n${data.listingWarning || ''}\n\n` +
         `Pay it from the Subscription page.`
       );
     }
 
-    closeVehicleModal();
-    await loadData();
     return alert(
       `✅ ${name} is live in the app!\n\n` +
-      `Plan: ${escapeHtml(tier.label)}\n` +
+      `Plan: ${data.listing.tierLabel}\n` +
       `Paid: ${money(tier.price)}\n` +
-      `Listed until: ${formatDate(subData.expiresAt)}`
+      `Listed until: ${formatDate(data.listing.expiresAt)}`
     );
   } catch (err) {
     alert('❌ ' + err.message);

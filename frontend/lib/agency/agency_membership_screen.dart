@@ -26,6 +26,10 @@ class _AgencyMembershipScreenState extends State<AgencyMembershipScreen> {
   bool _paying = false;
   String? _error;
 
+  /// Which platform plan the agency has picked — 'monthly' or 'yearly'.
+  /// Defaults to the first the API offers.
+  String? _selectedPlanId;
+
   @override
   void initState() {
     super.initState();
@@ -47,6 +51,11 @@ class _AgencyMembershipScreenState extends State<AgencyMembershipScreen> {
         _plans = plans;
         _subscription = sub;
         _loading = false;
+        // Keep whatever the agency picked; otherwise start on the plan they
+        // are already on, falling back to the first one offered.
+        _selectedPlanId ??=
+            (sub['platform'] as Map<String, dynamic>?)?['planId'] as String? ??
+            _planList(plans).firstOrNull?['id'] as String?;
       });
     } catch (e) {
       if (!mounted) return;
@@ -64,7 +73,36 @@ class _AgencyMembershipScreenState extends State<AgencyMembershipScreen> {
 
   String get _symbol => (_plans?['currencySymbol'] as String?) ?? '₹';
 
-  num get _price => (_plans?['platform']?['price'] as num?) ?? 0;
+  /// The monthly / yearly options the API publishes.
+  List<Map<String, dynamic>> _planList(Map<String, dynamic>? plans) {
+    final raw = (plans?['platform'] as Map<String, dynamic>?)?['plans'];
+    if (raw is! List) return const [];
+    return raw.whereType<Map<String, dynamic>>().toList();
+  }
+
+  List<Map<String, dynamic>> get _platformPlans => _planList(_plans);
+
+  /// The plan the agency is about to buy.
+  Map<String, dynamic>? get _selectedPlan {
+    final plans = _platformPlans;
+    if (plans.isEmpty) return null;
+    return plans.firstWhere(
+      (p) => p['id'] == _selectedPlanId,
+      orElse: () => plans.first,
+    );
+  }
+
+  /// What that plan costs. Falls back to the catalogue's headline figure when
+  /// the API offers no plan list at all.
+  num get _price =>
+      (_selectedPlan?['price'] as num?) ??
+      (_plans?['platform']?['price'] as num?) ??
+      0;
+
+  String get _periodLabel =>
+      (_selectedPlan?['period'] as String?) ??
+      (_plans?['billingPeriod'] as String?) ??
+      'month';
 
   Future<void> _pay() async {
     final confirmed = await showDialog<bool>(
@@ -74,10 +112,10 @@ class _AgencyMembershipScreenState extends State<AgencyMembershipScreen> {
         title: Text(_isActive ? 'Renew Membership' : 'Confirm Payment'),
         content: Text(
           _isActive
-              ? 'Extend ${widget.operatorName} by another month for '
+              ? 'Extend ${widget.operatorName} by another $_periodLabel for '
                     '${formatMoney(_price, symbol: _symbol)}?'
-              : 'Activate ${widget.operatorName} on Tripnix for one month for '
-                    '${formatMoney(_price, symbol: _symbol)}?',
+              : 'Activate ${widget.operatorName} on Tripnix for one '
+                    '$_periodLabel for ${formatMoney(_price, symbol: _symbol)}?',
           style: const TextStyle(height: 1.4),
         ),
         actions: [
@@ -103,6 +141,7 @@ class _AgencyMembershipScreenState extends State<AgencyMembershipScreen> {
     try {
       final result = await ApiService.instance.payPlatformFee(
         widget.operatorName,
+        planId: _selectedPlanId,
       );
       await _load();
       // Unlocks the showcase for a signed-in agency that just paid.
@@ -325,9 +364,12 @@ class _AgencyMembershipScreenState extends State<AgencyMembershipScreen> {
                         height: 1,
                       ),
                     ),
-                    const Text(
-                      'per month',
-                      style: TextStyle(color: Colors.white70, fontSize: 12),
+                    Text(
+                      'per $_periodLabel',
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
+                      ),
                     ),
                     const SizedBox(height: 16),
                     _row(
@@ -358,6 +400,41 @@ class _AgencyMembershipScreenState extends State<AgencyMembershipScreen> {
                   ],
                 ),
               ),
+              if (_platformPlans.length > 1) ...[
+                const SizedBox(height: 20),
+                const Text(
+                  'Choose your plan',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    for (final plan in _platformPlans)
+                      Expanded(
+                        child: Padding(
+                          padding: EdgeInsets.only(
+                            right: plan == _platformPlans.last ? 0 : 10,
+                          ),
+                          child: _PlanOption(
+                            label: plan['label'] as String? ?? '',
+                            price: formatMoney(
+                              plan['price'] as num? ?? 0,
+                              symbol: _symbol,
+                            ),
+                            note: plan['note'] as String?,
+                            selected: (plan['id'] as String?) == _selectedPlanId,
+                            onTap: _paying
+                                ? null
+                                : () => setState(
+                                    () => _selectedPlanId =
+                                        plan['id'] as String?,
+                                  ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
               const SizedBox(height: 20),
               SizedBox(
                 width: double.infinity,
@@ -383,7 +460,7 @@ class _AgencyMembershipScreenState extends State<AgencyMembershipScreen> {
                         )
                       : Text(
                           _isActive
-                              ? 'Renew for another month · ${formatMoney(_price, symbol: _symbol)}'
+                              ? 'Renew for another $_periodLabel · ${formatMoney(_price, symbol: _symbol)}'
                               : 'Pay Platform Fee · ${formatMoney(_price, symbol: _symbol)}',
                           style: const TextStyle(
                             fontSize: 14.5,
@@ -480,6 +557,90 @@ class _AgencyMembershipScreenState extends State<AgencyMembershipScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// One selectable platform plan — the monthly or yearly option.
+///
+/// The agency picks the term *before* paying, so the price on the button and
+/// the period the membership is extended by always match what they chose.
+class _PlanOption extends StatelessWidget {
+  const _PlanOption({
+    required this.label,
+    required this.price,
+    required this.selected,
+    required this.onTap,
+    this.note,
+  });
+
+  final String label;
+  final String price;
+  final String? note;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: selected
+              ? AppColors.red.withValues(alpha: 0.08)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: selected ? AppColors.red : Colors.black26,
+            width: selected ? 2 : 1,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  selected
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                  size: 16,
+                  color: selected ? AppColors.red : Colors.black38,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              price,
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w900,
+                height: 1,
+              ),
+            ),
+            if (note != null && note!.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                note!,
+                style: const TextStyle(fontSize: 10, color: Colors.black54),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

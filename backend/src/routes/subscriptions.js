@@ -1,5 +1,12 @@
 import { Router } from "express";
 import { refreshVehiclesFromDb } from "./vehicles.js";
+import {
+  dbRef,
+  databaseConfigured,
+  safeKey,
+  allocateId,
+  describeDatabaseError
+} from "../lib/firebase.js";
 
 const router = Router();
 
@@ -11,6 +18,10 @@ const YEAR_DAYS = 365;
 /// Plan catalogue. An agency pays a platform fee — monthly or yearly — plus one
 /// flat fee per vehicle, the same amount whatever the vehicle is.
 /// Prices are editable by the Super Admin at runtime.
+///
+/// This is the default only. Whatever the Super Admin has saved is loaded over
+/// the top of it, because a catalogue that lived in memory reset to these
+/// prices every time a serverless instance was recycled.
 let catalogue = {
   currency: "INR",
   currencySymbol: "₹",
@@ -62,10 +73,117 @@ let catalogue = {
   ]
 };
 
-// In-memory subscription records.
+// Subscription records for this process. The database is the real store —
+// these are a cache of it, refilled by refreshSubscriptionsFromDb().
+//
+// They used to live *only* here, which is why paying changed nothing on the
+// deployed site: the instance that took the payment kept the record, every
+// other instance saw an unpaid agency, and a recycled instance lost it for
+// good. Nothing may rely on these arrays without loading them first.
 let platformSubs = []; // one per agency
 let listingSubs = []; // one per vehicle
-let nextSubId = 1;
+
+// ─── Persistence ───────────────────────────────────────────
+
+function subscriptionsRef(path) {
+  return dbRef(path ? `subscriptions/${path}` : "subscriptions");
+}
+
+/// Realtime Database drops empty arrays and objects entirely, so a stored
+/// record comes back missing whichever fields were empty. Filling them in on
+/// the way out keeps every consumer working with the same shape.
+function normaliseSub(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  return {
+    ...raw,
+    id: Number(raw.id) || 0,
+    operatorName: raw.operatorName ?? "",
+    amount: Number(raw.amount ?? 0),
+    startsAt: raw.startsAt ?? new Date(0).toISOString(),
+    expiresAt: raw.expiresAt ?? new Date(0).toISOString(),
+    renewedAt: raw.renewedAt ?? null
+  };
+}
+
+/// Merges a stored catalogue over the built-in defaults, so a price the Super
+/// Admin never touched keeps its default rather than becoming undefined.
+function mergeCatalogue(stored) {
+  if (!stored || typeof stored !== "object") return;
+
+  if (stored.platform) {
+    catalogue.platform.price = Number(stored.platform.price ?? catalogue.platform.price);
+    const storedPlans = Array.isArray(stored.platform.plans) ? stored.platform.plans : [];
+    for (const plan of catalogue.platform.plans) {
+      const match = storedPlans.find((p) => p && p.id === plan.id);
+      if (match && Number.isFinite(Number(match.price))) plan.price = Number(match.price);
+    }
+  }
+
+  const storedTiers = Array.isArray(stored.vehicleTiers) ? stored.vehicleTiers : [];
+  for (const tier of catalogue.vehicleTiers) {
+    const match = storedTiers.find((t) => t && t.id === tier.id);
+    if (match && Number.isFinite(Number(match.price))) tier.price = Number(match.price);
+  }
+}
+
+/// Pulls every stored subscription and the saved prices into this process.
+///
+/// Must be awaited by anything that reads membership or listing state, because
+/// a freshly started instance knows nothing until it has run.
+export async function refreshSubscriptionsFromDb() {
+  if (!databaseConfigured) return;
+
+  try {
+    const snap = await subscriptionsRef().get();
+    const value = snap.val() || {};
+
+    platformSubs = Object.values(value.platform || {})
+      .map(normaliseSub)
+      .filter(Boolean);
+    listingSubs = Object.values(value.listings || {})
+      .map(normaliseSub)
+      .filter((s) => s && Number.isFinite(Number(s.vehicleId)))
+      .map((s) => ({ ...s, vehicleId: Number(s.vehicleId) }));
+
+    mergeCatalogue(value.catalogue);
+  } catch (e) {
+    console.error("Database get subscriptions error:", e);
+  }
+}
+
+async function savePlatformSub(sub) {
+  if (!databaseConfigured) return;
+  await subscriptionsRef(`platform/${safeKey(sub.operatorName)}`).set(sub);
+}
+
+async function saveListingSub(sub) {
+  if (!databaseConfigured) return;
+  await subscriptionsRef(`listings/${Number(sub.vehicleId)}`).set(sub);
+}
+
+async function saveCatalogue() {
+  if (!databaseConfigured) return;
+  await subscriptionsRef("catalogue").set({
+    platform: {
+      price: catalogue.platform.price,
+      plans: catalogue.platform.plans.map((p) => ({ id: p.id, price: p.price }))
+    },
+    vehicleTiers: catalogue.vehicleTiers.map((t) => ({ id: t.id, price: t.price }))
+  });
+}
+
+/// Drops a vehicle's listing when the vehicle itself is deleted, so the agency
+/// is not still shown as paying for a bus that no longer exists.
+export async function removeListingForVehicle(vehicleId) {
+  const id = Number(vehicleId);
+  listingSubs = listingSubs.filter((s) => Number(s.vehicleId) !== id);
+  if (!databaseConfigured) return;
+  try {
+    await subscriptionsRef(`listings/${id}`).remove();
+  } catch (e) {
+    console.error(`Database delete listing ${id} error:`, e);
+  }
+}
 
 // ─── Helpers ───────────────────────────────────────────────
 
@@ -107,73 +225,107 @@ export function platformPlan(planId) {
   return plans.find((p) => p.id.toLowerCase() === wanted) || plans[0];
 }
 
-export function autoActivateAgency(operatorName) {
-  const name = String(operatorName || "My Travels").trim();
-  const key = normalise(name);
-  let sub = platformSubs.find((s) => normalise(s.operatorName) === key);
-  const now = new Date();
-  const expiresAt = addDays(now, 365);
-
-  if (!sub) {
-    sub = {
-      id: nextSubId++,
-      operatorName: name,
-      planId: catalogue.platform.id,
-      planName: catalogue.platform.name,
-      amount: catalogue.platform.price,
-      startsAt: now.toISOString(),
-      expiresAt: expiresAt.toISOString(),
-      renewedAt: null
-    };
-    platformSubs.push(sub);
-  } else if (!isActive(sub)) {
-    sub.expiresAt = expiresAt.toISOString();
-  }
+/// The agency's platform membership record, paid or lapsed, or undefined.
+function platformSubFor(operatorName) {
+  const key = normalise(operatorName);
+  return platformSubs.find((s) => normalise(s.operatorName) === key);
 }
 
-export function autoActivateVehicleListing(operatorName, vehicleId, type) {
-  const name = String(operatorName || "My Travels").trim();
-  if (vehicleId === undefined) return;
-  autoActivateAgency(name);
+/// The listing record for one vehicle, paid or lapsed, or undefined.
+function listingSubFor(vehicleId) {
   const id = Number(vehicleId);
-  const key = normalise(name);
-  let listing = listingSubs.find((s) => s.vehicleId === id && normalise(s.operatorName) === key);
-  const now = new Date();
-  const expiresAt = addDays(now, 365);
+  return listingSubs.find((s) => Number(s.vehicleId) === id);
+}
 
-  if (!listing) {
-    const tier = tierForVehicle(type) || catalogue.vehicleTiers[0];
-    listing = {
-      id: nextSubId++,
-      operatorName: name,
-      vehicleId: id,
-      vehicleName: `Vehicle #${id}`,
-      tierId: tier.id,
-      tierLabel: tier.label,
-      amount: tier.price,
-      startsAt: now.toISOString(),
-      expiresAt: expiresAt.toISOString(),
-      renewedAt: null
-    };
-    listingSubs.push(listing);
-  } else if (!isActive(listing)) {
-    listing.expiresAt = expiresAt.toISOString();
+/// Records the platform fee as paid, for `plan`, and stores it.
+///
+/// Renewing early extends from the current expiry rather than from today, so
+/// an agency is never charged for time it has already bought.
+export async function activatePlatformMembership(operatorName, plan) {
+  const name = String(operatorName || "").trim();
+  const existing = platformSubFor(name);
+  const now = new Date();
+  const startsAt = isActive(existing) ? new Date(existing.expiresAt) : now;
+  const expiresAt = addDays(startsAt, plan.durationDays);
+
+  const sub = {
+    id: existing?.id || (await nextSubscriptionId()),
+    operatorName: name,
+    planId: plan.id,
+    planName: `${catalogue.platform.name} (${plan.label})`,
+    amount: (existing?.amount || 0) + plan.price,
+    startsAt: (existing?.startsAt && new Date(existing.startsAt)) || now,
+    expiresAt: expiresAt.toISOString(),
+    renewedAt: existing ? now.toISOString() : null
+  };
+  sub.startsAt = new Date(sub.startsAt).toISOString();
+
+  platformSubs = [...platformSubs.filter((s) => s !== existing), sub];
+  await savePlatformSub(sub);
+  return sub;
+}
+
+/// Records one vehicle's listing fee as paid for a month, and stores it.
+export async function activateVehicleListing(operatorName, vehicle) {
+  const name = String(operatorName || "").trim();
+  const tier = tierForVehicle();
+  if (!tier) throw new Error("No vehicle listing plan is configured");
+
+  const existing = listingSubFor(vehicle.id);
+  const now = new Date();
+  const startsAt = isActive(existing) ? new Date(existing.expiresAt) : now;
+
+  const sub = {
+    id: existing?.id || (await nextSubscriptionId()),
+    operatorName: name,
+    vehicleId: Number(vehicle.id),
+    vehicleName: vehicle.name || `Vehicle #${vehicle.id}`,
+    tierId: tier.id,
+    tierLabel: tier.label,
+    amount: (existing?.amount || 0) + tier.price,
+    startsAt: new Date(existing?.startsAt || now).toISOString(),
+    expiresAt: addDays(startsAt, MONTH_DAYS).toISOString(),
+    renewedAt: existing ? now.toISOString() : null
+  };
+
+  listingSubs = [...listingSubs.filter((s) => s !== existing), sub];
+  await saveListingSub(sub);
+  return sub;
+}
+
+/// Subscription ids come from the same collision-proof allocator as vehicles
+/// and trips, so two instances issuing receipts at once cannot reuse one.
+async function nextSubscriptionId() {
+  if (!databaseConfigured) {
+    return Math.max(0, ...platformSubs.map((s) => s.id), ...listingSubs.map((s) => s.id)) + 1;
   }
+  const known = Math.max(
+    0,
+    ...platformSubs.map((s) => Number(s.id) || 0),
+    ...listingSubs.map((s) => Number(s.id) || 0)
+  );
+  return allocateId("subscriptions", known);
 }
 
 /// True when the agency has paid the platform fee and it has not lapsed.
+///
+/// This used to activate the agency and return true unconditionally, which
+/// made every gate in the product decorative — an agency could add vehicles
+/// and go live in the app without ever paying.
 export function hasActivePlatformMembership(operatorName) {
-  if (!operatorName) return true;
-  autoActivateAgency(operatorName);
-  return true;
+  if (!operatorName) return false;
+  return isActive(platformSubFor(operatorName));
 }
 
-/// True when a vehicle may appear in the public traveller app:
-/// Every vehicle added by an agency automatically shows in the user section.
+/// True when a vehicle may appear in the public traveller app.
+///
+/// Both fees have to be current: the agency's platform membership keeps the
+/// agency itself on the platform, and the per-vehicle listing fee keeps that
+/// particular bus visible. Either lapsing hides the bus.
 export function isVehiclePubliclyListed(vehicle) {
   if (!vehicle) return false;
-  autoActivateVehicleListing(vehicle.operatorName, vehicle.id, vehicle.type);
-  return true;
+  if (!hasActivePlatformMembership(vehicle.operatorName)) return false;
+  return isActive(listingSubFor(vehicle.id));
 }
 
 /// Agencies currently visible to travellers, with their fleet size.
@@ -190,12 +342,16 @@ export function listedAgencies(vehicles) {
 // ─── Plans ─────────────────────────────────────────────────
 
 // GET /api/subscriptions/plans
-router.get("/plans", (req, res) => {
+router.get("/plans", async (req, res) => {
+  // Prices the Super Admin edited are stored, so they have to be loaded before
+  // the catalogue is quoted — otherwise a fresh instance quotes the defaults.
+  await refreshSubscriptionsFromDb();
   res.json(catalogue);
 });
 
 // PUT /api/subscriptions/plans - Super Admin updates pricing
-router.put("/plans", (req, res) => {
+router.put("/plans", async (req, res) => {
+  await refreshSubscriptionsFromDb();
   const { platformPrice, platformPlans, tiers } = req.body;
 
   if (platformPrice !== undefined) {
@@ -244,6 +400,16 @@ router.put("/plans", (req, res) => {
     }
   }
 
+  try {
+    await saveCatalogue();
+  } catch (e) {
+    console.error("Database save catalogue error:", e);
+    const described = describeDatabaseError(e);
+    return res.status(described?.status || 503).json({
+      error: described?.message || `Could not save the new prices: ${e.message}`
+    });
+  }
+
   res.json(catalogue);
 });
 
@@ -256,17 +422,9 @@ router.get("/", async (req, res) => {
     return res.status(400).json({ error: "operatorName query param is required" });
   }
 
-  // Subscription records live in this process's memory only. Deployed, each
-  // request can land on a different serverless instance, so the one answering
-  // here is usually not the one that handled the sign-in — it would report no
-  // membership and no listings at all. That answer locks the admin portal out
-  // of its own features: "Add Bus" refuses with "your agency is not
-  // registered", and every bus in the Post a Trip picker is disabled as
-  // unsubscribed. So rebuild the records from what is actually stored before
-  // answering: the fleet re-lists each vehicle, and the agency itself is
-  // activated explicitly for the case where it has no vehicles yet.
-  await refreshVehiclesFromDb();
-  autoActivateAgency(operatorName);
+  // A serverless instance starts with no records at all, so what the agency
+  // has actually paid for has to be loaded before it can be reported.
+  await refreshSubscriptionsFromDb();
 
   const key = normalise(operatorName);
 
@@ -282,9 +440,9 @@ router.get("/", async (req, res) => {
 
 // GET /api/subscriptions/overview - Super Admin: every agency at a glance
 router.get("/overview", async (req, res) => {
-  // Same reason as GET / above: without the stored fleet this instance knows
+  // Same reason as GET / above: without the stored records this instance knows
   // about no agencies at all and the Super Admin sees an empty table.
-  await refreshVehiclesFromDb();
+  await refreshSubscriptionsFromDb();
 
   const names = new Set([
     ...platformSubs.map((s) => s.operatorName),
@@ -313,11 +471,13 @@ router.get("/overview", async (req, res) => {
 
 // POST /api/subscriptions/platform - pay or renew the platform fee.
 // Body: { operatorName, planId?: "monthly" | "yearly" }
-router.post("/platform", (req, res) => {
+router.post("/platform", async (req, res) => {
   const { operatorName, planId } = req.body;
   if (!operatorName || !String(operatorName).trim()) {
     return res.status(400).json({ error: "operatorName is required" });
   }
+
+  await refreshSubscriptionsFromDb();
 
   if (planId && !catalogue.platform.plans.some((p) => p.id === planId)) {
     return res.status(400).json({
@@ -327,46 +487,34 @@ router.post("/platform", (req, res) => {
     });
   }
 
-  const plan = platformPlan(planId);
   const name = String(operatorName).trim();
-  const key = normalise(name);
-  const existing = platformSubs.find((s) => normalise(s.operatorName) === key);
+  const existing = platformSubFor(name);
+  const renewal = Boolean(existing);
 
-  // Renewing early extends from the current expiry, not from today.
-  const now = new Date();
-  const startsAt = isActive(existing) ? new Date(existing.expiresAt) : now;
-  const expiresAt = addDays(startsAt, plan.durationDays);
-
-  if (existing) {
-    existing.amount += plan.price;
-    existing.planId = plan.id;
-    existing.planName = `${catalogue.platform.name} (${plan.label})`;
-    existing.expiresAt = expiresAt.toISOString();
-    existing.renewedAt = now.toISOString();
-    return res.json(withStatus(existing));
+  // No payment gateway yet, so reaching this endpoint *is* the payment. The
+  // record is written the same way it will be once a gateway confirms one, so
+  // only the trigger changes later.
+  try {
+    const sub = await activatePlatformMembership(name, platformPlan(planId));
+    return res.status(renewal ? 200 : 201).json(withStatus(sub));
+  } catch (e) {
+    console.error("Database save platform subscription error:", e);
+    const described = describeDatabaseError(e);
+    return res.status(described?.status || 503).json({
+      error: described?.message || `Could not record the payment: ${e.message}`
+    });
   }
-
-  const sub = {
-    id: nextSubId++,
-    operatorName: name,
-    planId: plan.id,
-    planName: `${catalogue.platform.name} (${plan.label})`,
-    amount: plan.price,
-    startsAt: now.toISOString(),
-    expiresAt: expiresAt.toISOString(),
-    renewedAt: null
-  };
-  platformSubs.push(sub);
-  res.status(201).json(withStatus(sub));
 });
 
 // POST /api/subscriptions/listing - pay or renew one vehicle's monthly fee
-router.post("/listing", (req, res) => {
-  const { operatorName, vehicleId, vehicleName, type, capacity } = req.body;
+router.post("/listing", async (req, res) => {
+  const { operatorName, vehicleId, vehicleName } = req.body;
 
   if (!operatorName || vehicleId === undefined) {
     return res.status(400).json({ error: "operatorName and vehicleId are required" });
   }
+
+  await refreshSubscriptionsFromDb();
 
   const name = String(operatorName).trim();
   if (!hasActivePlatformMembership(name)) {
@@ -375,45 +523,24 @@ router.post("/listing", (req, res) => {
     });
   }
 
-  const tier = tierForVehicle(type);
-  if (!tier) {
-    return res.status(400).json({
-      error: `No subscription plan exists for vehicle type "${type}"`
+  if (!tierForVehicle()) {
+    return res.status(400).json({ error: "No vehicle listing plan is configured" });
+  }
+
+  try {
+    const existing = listingSubFor(vehicleId);
+    const sub = await activateVehicleListing(name, {
+      id: vehicleId,
+      name: vehicleName || existing?.vehicleName
+    });
+    return res.status(existing ? 200 : 201).json(withStatus(sub));
+  } catch (e) {
+    console.error("Database save listing subscription error:", e);
+    const described = describeDatabaseError(e);
+    return res.status(described?.status || 503).json({
+      error: described?.message || `Could not record the payment: ${e.message}`
     });
   }
-
-  const id = Number(vehicleId);
-  const existing = listingSubs.find(
-    (s) => s.vehicleId === id && normalise(s.operatorName) === normalise(name)
-  );
-
-  const now = new Date();
-  const startsAt = isActive(existing) ? new Date(existing.expiresAt) : now;
-  const expiresAt = addDays(startsAt, MONTH_DAYS);
-
-  if (existing) {
-    existing.amount += tier.price;
-    existing.tierId = tier.id;
-    existing.tierLabel = tier.label;
-    existing.expiresAt = expiresAt.toISOString();
-    existing.renewedAt = now.toISOString();
-    return res.json(withStatus(existing));
-  }
-
-  const sub = {
-    id: nextSubId++,
-    operatorName: name,
-    vehicleId: id,
-    vehicleName: vehicleName || `Vehicle #${id}`,
-    tierId: tier.id,
-    tierLabel: tier.label,
-    amount: tier.price,
-    startsAt: now.toISOString(),
-    expiresAt: expiresAt.toISOString(),
-    renewedAt: null
-  };
-  listingSubs.push(sub);
-  res.status(201).json(withStatus(sub));
 });
 
 export default router;
