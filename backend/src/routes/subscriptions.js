@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { refreshVehiclesFromDb } from "./vehicles.js";
 
 const router = Router();
 
@@ -249,11 +250,24 @@ router.put("/plans", (req, res) => {
 // ─── Agency subscription state ─────────────────────────────
 
 // GET /api/subscriptions?operatorName=KPN Travels
-router.get("/", (req, res) => {
+router.get("/", async (req, res) => {
   const { operatorName } = req.query;
   if (!operatorName) {
     return res.status(400).json({ error: "operatorName query param is required" });
   }
+
+  // Subscription records live in this process's memory only. Deployed, each
+  // request can land on a different serverless instance, so the one answering
+  // here is usually not the one that handled the sign-in — it would report no
+  // membership and no listings at all. That answer locks the admin portal out
+  // of its own features: "Add Bus" refuses with "your agency is not
+  // registered", and every bus in the Post a Trip picker is disabled as
+  // unsubscribed. So rebuild the records from what is actually stored before
+  // answering: the fleet re-lists each vehicle, and the agency itself is
+  // activated explicitly for the case where it has no vehicles yet.
+  await refreshVehiclesFromDb();
+  autoActivateAgency(operatorName);
+
   const key = normalise(operatorName);
 
   const platform = platformSubs.find((s) => normalise(s.operatorName) === key);
@@ -267,7 +281,11 @@ router.get("/", (req, res) => {
 });
 
 // GET /api/subscriptions/overview - Super Admin: every agency at a glance
-router.get("/overview", (req, res) => {
+router.get("/overview", async (req, res) => {
+  // Same reason as GET / above: without the stored fleet this instance knows
+  // about no agencies at all and the Super Admin sees an empty table.
+  await refreshVehiclesFromDb();
+
   const names = new Set([
     ...platformSubs.map((s) => s.operatorName),
     ...listingSubs.map((s) => s.operatorName)

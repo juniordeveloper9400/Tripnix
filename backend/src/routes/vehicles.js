@@ -219,6 +219,11 @@ router.post("/", async (req, res) => {
     return res.status(400).json({ error: "vehicleNumber is required" });
   }
 
+  // `nextId` counts up from whatever this process has loaded, so a process
+  // that has loaded nothing hands out id 1 again and the new bus overwrites
+  // the agency's first one in the database.
+  await refreshVehiclesFromDb();
+
   const owner = operatorName || "My Travels";
   hasActivePlatformMembership(owner);
 

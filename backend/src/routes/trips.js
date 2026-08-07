@@ -109,6 +109,11 @@ export function tripsForVehicle(vehicleId) {
 router.get("/", async (req, res) => {
   const { operatorName, listed } = req.query;
 
+  // Each trip is decorated with the bus it runs on, so an unloaded fleet marks
+  // every trip as belonging to an unlisted bus — which hides them from the
+  // traveller feed and flags them "bus not subscribed" in the admin table.
+  await refreshVehiclesFromDb();
+
   if (databaseConfigured) {
     try {
       const snap = await tripsRef().get();
@@ -210,7 +215,9 @@ router.get("/fleet-status", async (req, res) => {
 });
 
 // GET /api/trips/:id
-router.get("/:id", (req, res) => {
+router.get("/:id", async (req, res) => {
+  await refreshVehiclesFromDb();
+  await refreshTripsFromDb();
   const trip = trips.find((t) => t.id === Number(req.params.id));
   if (!trip) return res.status(404).json({ error: "Trip not found" });
   res.json(decorate(trip));
@@ -227,6 +234,13 @@ router.post("/", async (req, res) => {
         "operatorName, vehicleId, place, departureDate and arrivalDate are required"
     });
   }
+
+  // A freshly started process holds an empty fleet and no trips, so without
+  // these two the lookup below answered "Vehicle not found" for a bus the
+  // agency could plainly see in the picker, and `nextId` restarted at 1 —
+  // overwriting an already stored trip.
+  await refreshVehiclesFromDb();
+  await refreshTripsFromDb();
 
   const vehicle = findVehicle(Number(vehicleId));
   if (!vehicle) {
@@ -288,6 +302,9 @@ router.post("/", async (req, res) => {
 // DELETE /api/trips/:id
 router.delete("/:id", async (req, res) => {
   const id = Number(req.params.id);
+  // Without this a stored trip is invisible to a process that has not loaded
+  // it yet, so Delete answered "Trip not found" and the row stayed put.
+  await refreshTripsFromDb();
   const exists = trips.some((t) => t.id === id);
   if (!exists) return res.status(404).json({ error: "Trip not found" });
 
