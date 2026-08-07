@@ -10,6 +10,12 @@
   "engines": {
     "node": "22.x"
   },
+  "comments": {
+    "overrides.jose": "firebase-admin -> jwks-rsa 4.x require()s jose, but jose 6 is ESM-only, so the call only works on Node >= 20.19 / 22.12. On an older runtime — which is what Vercel gave us — loading firebase-admin threw ERR_REQUIRE_ESM and every /api request died with FUNCTION_INVOCATION_FAILED. jose 5 still ships a CommonJS build, and jwks-rsa only uses importJWK and exportSPKI, which are identical in both."
+  },
+  "overrides": {
+    "jose": "^5.10.0"
+  },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1104.0",
     "@aws-sdk/s3-request-presigner": "^3.1104.0",

@@ -22,6 +22,11 @@ function fail(res, err, stage) {
   res.status(500).json({
     error: err?.message || "Internal server error",
     stage,
+    // firebase-admin 14 requires Node >= 22, and its jwks-rsa dependency
+    // require()s the ESM-only jose package — which only works from Node 20.19
+    // / 22.12 onwards. Naming the version turns "it crashes on the server" into
+    // a one-line answer.
+    nodeVersion: process.version,
     // The stack is only useful while a deployment is broken, and it can name
     // internal paths, so it stays behind an explicit opt-in.
     stack: process.env.DEBUG_API_ERRORS ? err?.stack : undefined

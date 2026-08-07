@@ -41,6 +41,7 @@ app.get(["/", "/api"], (req, res) => {
     status: "ok",
     version: "1.0.0",
     firebaseDatabaseConnected: databaseConfigured,
+    nodeVersion: process.version,
     adminUrl: `http://localhost:${PORT}/admin`
   });
 });
