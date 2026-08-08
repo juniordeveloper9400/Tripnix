@@ -9,7 +9,7 @@ let state = {
   bookings: [],
   admins: [],
   plans: null,          // plan catalogue from the backend
-  subscription: null,   // this agency's membership + vehicle listings
+  subscription: null,   // this agency's platform membership + fleet plan
   agencySubs: [],       // super admin: every agency's subscription state
   trips: [],            // trips this agency has posted
   activeTab: 'dashboard',
@@ -779,21 +779,20 @@ function renderTripVehicleOptions() {
   const select = document.getElementById('trip-vehicle');
   if (!select) return;
 
-  const listings = state.subscription?.listings || [];
-  const isListed = v => listings.some(l => l.vehicleId === v.id && l.status === 'active');
-
   if (!state.vehicles.length) {
     select.innerHTML = `<option value="">No vehicles in your fleet yet</option>`;
     return;
   }
 
+  // The fleet fee covers every vehicle at once, so it is the whole fleet that
+  // is carryable or not — never one bus and not another.
+  const ok = isFleetActive();
+
   const previous = select.value;
-  select.innerHTML = state.vehicles.map(v => {
-    const ok = isListed(v);
-    return `<option value="${v.id}" ${ok ? '' : 'disabled'}>
-      ${escapeHtml(v.name)} · ${escapeHtml(v.vehicleNumber || '—')}${ok ? '' : '  (no active subscription)'}
-    </option>`;
-  }).join('');
+  select.innerHTML = state.vehicles.map(v => `
+    <option value="${v.id}" ${ok ? '' : 'disabled'}>
+      ${escapeHtml(v.name)} · ${escapeHtml(v.vehicleNumber || '—')}${ok ? '' : '  (fleet fee not paid)'}
+    </option>`).join('');
   if (previous) select.value = previous;
 }
 
@@ -957,18 +956,53 @@ function formatDate(iso) {
   });
 }
 
-/// The listing plan for a vehicle. One flat fee per vehicle, per period.
+/// The fleet band a given number of vehicles falls into.
 ///
-/// One flat fee covers every vehicle, so this must not match on type. Matching
-/// "Bus" against the catalogue's single "All" tier never succeeded, which put
-/// "No subscription plan exists for vehicle type Bus" in the Add Vehicle form
-/// and replaced the Pay button in the Subscription table with "No matching
-/// tier" — so no vehicle could be added or subscribed at all.
-///
-/// The API charges `vehicleTiers[0]` regardless of type, and this has to agree
-/// with it or the price quoted here is not the price charged.
-function tierForVehicle() {
-  return state.plans?.vehicleTiers?.[0] || null;
+/// One fee covers the whole fleet and is priced by fleet size, so nothing here
+/// looks at vehicle type. This mirrors the API's own banding exactly — if the
+/// two disagreed, the price quoted in the form would not be the price charged.
+function fleetTierFor(count) {
+  const tiers = state.plans?.fleetTiers || [];
+  const size = Math.max(1, Number(count) || 0);
+  return (
+    tiers.find(
+      t => size >= t.minVehicles && (t.maxVehicles === null || size <= t.maxVehicles)
+    ) || tiers[tiers.length - 1] || null
+  );
+}
+
+/// How many vehicles this agency runs right now.
+function fleetSize() {
+  return state.vehicles.length;
+}
+
+/// The agency's fleet subscription, or null before it has paid one.
+function fleetSub() {
+  return state.subscription?.fleet || null;
+}
+
+function isFleetActive() {
+  return fleetSub()?.status === 'active';
+}
+
+/// What adding one more vehicle costs today: nothing while the fleet stays in
+/// its paid band, otherwise the step up to the next band's price.
+function costToAddVehicle() {
+  const next = fleetTierFor(fleetSize() + 1);
+  if (!next) return null;
+
+  const current = fleetSub();
+  if (!current || current.status !== 'active') {
+    return { tier: next, charge: next.price, upgrade: false };
+  }
+  if (current.tierId === next.tierId) {
+    return { tier: next, charge: 0, upgrade: false };
+  }
+  return {
+    tier: next,
+    charge: Math.max(0, next.price - (current.price || 0)),
+    upgrade: true
+  };
 }
 
 /// "month" / "year" — whatever the catalogue is billing on.
@@ -1057,26 +1091,33 @@ function renderMembershipCard() {
   if (navBadge) navBadge.style.display = active ? 'none' : 'inline-block';
 }
 
-/// One flat listing fee covers every vehicle, so this renders a single card
-/// rather than one per category.
+/// The fleet-fee ladder: one card per band, with the agency's current band
+/// marked so it can see what it is on and what growing would cost.
 function renderPlanGrid() {
   const grid = state.plans ? document.getElementById('plan-grid') : null;
   if (!grid) return;
 
-  const tier = state.plans.vehicleTiers[0];
-  if (!tier) {
-    grid.innerHTML = '<p class="plan-empty">No vehicle plan configured.</p>';
+  const tiers = state.plans.fleetTiers || [];
+  if (!tiers.length) {
+    grid.innerHTML = '<p class="plan-empty">No fleet plan configured.</p>';
     return;
   }
 
+  const currentId = fleetTierFor(fleetSize())?.id;
+
   grid.innerHTML = `
     <div class="plan-cards">
-      <div class="plan-card plan-card-wide">
-        <span class="plan-card-tier">🚍 ${escapeHtml(tier.label)}</span>
-        <span class="plan-card-seats">${escapeHtml(tier.seatsLabel)}</span>
-        <div class="plan-card-price">${money(tier.price)}</div>
-        <span class="plan-card-period">per vehicle / ${period()}</span>
-      </div>
+      ${tiers.map(t => `
+        <div class="plan-card${t.id === currentId && fleetSize() > 0 ? ' is-current' : ''}">
+          <span class="plan-card-tier">🚍 ${escapeHtml(t.label)}</span>
+          <span class="plan-card-seats">${
+            t.maxVehicles === null
+              ? `${t.minVehicles} or more vehicles`
+              : `${t.minVehicles}–${t.maxVehicles} vehicles, one fee`
+          }</span>
+          <div class="plan-card-price">${money(t.price)}</div>
+          <span class="plan-card-period">whole fleet / ${period()}</span>
+        </div>`).join('')}
     </div>`;
 }
 
@@ -1116,42 +1157,44 @@ function renderListingsTable() {
     return;
   }
 
-  const listings = state.subscription?.listings || [];
-  let outstanding = 0;
+  // Every vehicle sits under the one fleet subscription, so the per-vehicle
+  // rows all report the same state — what differs is only which band the fleet
+  // is on and whether that band is paid up.
+  const sub    = fleetSub();
+  const paid   = isFleetActive();
+  const band   = fleetTierFor(fleetSize());
+  const status = paid
+    ? `<span class="badge-status confirmed">LISTED</span>`
+    : sub
+      ? `<span class="badge-status cancelled">EXPIRED</span>`
+      : `<span class="badge-status pending">UNPAID</span>`;
 
-  tbody.innerHTML = state.vehicles.map(v => {
-    const tier = tierForVehicle(v);
-    const sub  = listings.find(l => l.vehicleId === v.id);
-    const paid = sub?.status === 'active';
-    if (!paid && tier) outstanding += tier.price;
+  tbody.innerHTML = state.vehicles.map(v => `
+    <tr>
+      <td><strong>${escapeHtml(v.name)}</strong></td>
+      <td><code class="vehicle-number">${escapeHtml(v.vehicleNumber || '—')}</code></td>
+      <td>${escapeHtml(v.type)}</td>
+      <td>${v.capacity}</td>
+      <td><small style="color:var(--text-muted);">covered by fleet plan</small></td>
+      <td>${status}</td>
+      <td><small style="color:var(--text-muted);">—</small></td>
+    </tr>`).join('');
 
-    const statusCell = paid
-      ? `<span class="badge-status confirmed">LISTED</span><br><small style="color:var(--text-muted);">till ${formatDate(sub.expiresAt)}</small>`
-      : sub
-        ? `<span class="badge-status cancelled">EXPIRED</span>`
-        : `<span class="badge-status pending">UNPAID</span>`;
+  // The one action there is belongs to the fleet, not to any single row.
+  const bandLabel = band ? escapeHtml(band.label) : '—';
+  const price = band ? money(band.price) : '—';
 
-    const actionCell = !tier
-      ? '<small style="color:var(--text-muted);">No matching tier</small>'
-      : `<button class="btn btn-secondary btn-sm" onclick="payListingFee(${v.id})">
-           ${paid ? '🔄 Renew' : '💳 Pay ' + money(tier.price)}
-         </button>`;
-
-    return `
-      <tr>
-        <td><strong>${escapeHtml(v.name)}</strong></td>
-        <td><code class="vehicle-number">${escapeHtml(v.vehicleNumber || '—')}</code></td>
-        <td>${escapeHtml(v.type)}</td>
-        <td>${v.capacity}</td>
-        <td>${tier ? money(tier.price) + '/' + period() : '—'}</td>
-        <td>${statusCell}</td>
-        <td>${actionCell}</td>
-      </tr>`;
-  }).join('');
-
-  note.textContent = outstanding > 0
-    ? `${money(outstanding)} / ${period()} in vehicle fees outstanding`
-    : 'All vehicles are listed and paid up';
+  if (paid) {
+    note.innerHTML =
+      `${fleetSize()} vehicle${fleetSize() === 1 ? '' : 's'} on the <strong>${bandLabel}</strong> plan ` +
+      `(${price}/${period()}) · renews ${formatDate(sub.expiresAt)} · ${sub.daysLeft} days left ` +
+      `<button class="btn btn-secondary btn-sm" style="margin-left:10px;" onclick="payFleetFee()">🔄 Renew ${price}</button>`;
+  } else {
+    note.innerHTML =
+      `Your fleet of ${fleetSize()} needs the <strong>${bandLabel}</strong> plan (${price}/${period()}). ` +
+      `Your vehicles stay hidden from travellers until it is paid. ` +
+      `<button class="btn btn-primary btn-sm" style="margin-left:10px;" onclick="payFleetFee()">💳 Pay ${price}</button>`;
+  }
 }
 
 function renderSuperAdminSubscriptionPanels() {
@@ -1165,30 +1208,29 @@ function renderSuperAdminSubscriptionPanels() {
   panels.classList.remove('hidden');
 
   // Pricing form — only repopulate when the owner isn't mid-edit.
-  const platformPlans = state.plans.platform.plans || [];
-  const monthlyPlan = platformPlans.find(p => p.id === 'monthly');
-  const yearlyPlan  = platformPlans.find(p => p.id === 'yearly');
+  const plan = (state.plans.platform.plans || [])[0];
 
   const platformInput = document.getElementById('price-platform');
   if (platformInput && document.activeElement !== platformInput) {
-    platformInput.value = monthlyPlan ? monthlyPlan.price : state.plans.platform.price;
+    platformInput.value = plan ? plan.price : state.plans.platform.price;
+  }
+  const platformLabel = document.getElementById('price-platform-label');
+  if (platformLabel && plan) {
+    platformLabel.textContent = `Platform membership (per ${plan.period})`;
   }
 
-  const yearlyInput = document.getElementById('price-platform-yearly');
-  if (yearlyInput && yearlyPlan && document.activeElement !== yearlyInput) {
-    yearlyInput.value = yearlyPlan.price;
-  }
-
+  // One input per fleet band. Built once, then only the values are refreshed,
+  // so typing a price is never interrupted by a background reload.
   const tierInputs = document.getElementById('tier-price-inputs');
   if (!tierInputs.dataset.built) {
-    tierInputs.innerHTML = state.plans.vehicleTiers.map(t => `
+    tierInputs.innerHTML = (state.plans.fleetTiers || []).map(t => `
       <div class="form-group">
-        <label for="price-${t.id}">${escapeHtml(t.label)} <small style="color:var(--text-muted);">(per vehicle / ${period()})</small></label>
+        <label for="price-${t.id}">${escapeHtml(t.label)} <small style="color:var(--text-muted);">(whole fleet / ${period()})</small></label>
         <input type="number" id="price-${t.id}" data-tier-id="${t.id}" min="0" step="1" required />
       </div>`).join('');
     tierInputs.dataset.built = 'true';
   }
-  state.plans.vehicleTiers.forEach(t => {
+  (state.plans.fleetTiers || []).forEach(t => {
     const input = document.getElementById(`price-${t.id}`);
     if (input && document.activeElement !== input) input.value = t.price;
   });
@@ -1207,7 +1249,10 @@ function renderSuperAdminSubscriptionPanels() {
         ? `<span class="badge-status ${a.platform.status === 'active' ? 'confirmed' : 'cancelled'}">${a.platform.status.toUpperCase()}</span>`
         : `<span class="badge-status pending">NONE</span>`}</td>
       <td>${a.platform ? formatDate(a.platform.expiresAt) : '—'}</td>
-      <td>${a.activeListings} / ${a.listingCount}</td>
+      <td>${a.fleet
+        ? `${escapeHtml(a.fleet.tierLabel)} · ${a.vehicleCount} vehicle${a.vehicleCount === 1 ? '' : 's'}` +
+          `<br><span class="badge-status ${a.fleet.status === 'active' ? 'confirmed' : 'cancelled'}">${a.fleet.status.toUpperCase()}</span>`
+        : '<span class="badge-status pending">NO FLEET PLAN</span>'}</td>
       <td><strong>${money(a.totalPaid)}</strong></td>
     </tr>`).join('');
 }
@@ -1222,40 +1267,44 @@ function applyPlatformGate() {
   addVehicleBtn.classList.toggle('btn-locked', !active);
 }
 
-window.payListingFee = async function(vehicleId) {
-  const vehicle = state.vehicles.find(v => v.id === vehicleId);
-  if (!vehicle) return;
+/// Pays or renews the one fee that covers the whole fleet.
+///
+/// There is no per-vehicle payment any more: the band the agency is on is
+/// decided by how many vehicles it runs, so this is a single agency-level
+/// action rather than one button per bus.
+window.payFleetFee = async function() {
+  const operatorName = state.currentUser?.operatorName;
+  if (!operatorName) return;
 
-  const tier = tierForVehicle();
-  if (!tier) return alert('❌ No vehicle listing plan is configured.');
+  const band = fleetTierFor(fleetSize());
+  if (!band) return alert('❌ No fleet plan is configured.');
 
-  // The API bills a listing for one billing period, so the confirmation has to
-  // quote that same period rather than a hardcoded year.
-  if (!confirm(`Confirm payment of ${money(tier.price)} to list "${vehicle.name}" for 1 ${period()}?\n\nTier: ${tier.label} (${tier.seatsLabel})`)) return;
+  const renewing = isFleetActive();
+  const question = renewing
+    ? `Renew the ${band.label} fleet plan for another ${period()}?\n\nCovers all ${fleetSize()} of your vehicles.\nAmount: ${money(band.price)}`
+    : `Confirm payment of ${money(band.price)} for the ${band.label} fleet plan?\n\nIt covers all ${fleetSize()} of your vehicles for 1 ${period()}.`;
+  if (!confirm(question)) return;
 
   try {
-    const res = await fetch(`${API_BASE}/subscriptions/listing`, {
+    const res = await fetch(`${API_BASE}/subscriptions/fleet`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        operatorName: vehicle.operatorName,
-        vehicleId: vehicle.id,
-        vehicleName: vehicle.name,
-        type: vehicle.type,
-        capacity: vehicle.capacity
-      })
+      body: JSON.stringify({ operatorName, vehicleCount: fleetSize() })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error || 'Payment failed');
 
     await loadSubscription();
-    // Being listed is what makes a bus visible in the app and selectable for a
-    // trip, so the views that read that have to be redrawn too — otherwise the
-    // fleet card still reads "not listed" until the next full refresh.
+    // A paid fleet is what makes the buses visible in the app and selectable
+    // for a trip, so the views that read that have to be redrawn too.
     renderFleetGrid();
     renderTripVehicleOptions();
 
-    alert(`✅ ${vehicle.name} is now listed!\n\nPlan: ${tier.label}\nPaid: ${money(tier.price)}\nValid until: ${formatDate(data.expiresAt)}`);
+    alert(
+      `✅ Your fleet is listed!\n\n` +
+      `Plan: ${data.tierLabel}\nCovers: ${fleetSize()} vehicle${fleetSize() === 1 ? '' : 's'}\n` +
+      `Paid: ${money(band.price)}\nValid until: ${formatDate(data.expiresAt)}`
+    );
   } catch (err) {
     alert('❌ ' + err.message);
   }
@@ -1265,20 +1314,14 @@ async function handlePricingSubmit(e) {
   e.preventDefault();
 
   const platformPrice = Number(document.getElementById('price-platform').value);
-  const yearlyPrice   = Number(document.getElementById('price-platform-yearly').value);
-  const tiers = [...document.querySelectorAll('#tier-price-inputs input[data-tier-id]')]
+  const fleetTiers = [...document.querySelectorAll('#tier-price-inputs input[data-tier-id]')]
     .map(input => ({ id: input.dataset.tierId, price: Number(input.value) }));
-
-  const platformPlans = [
-    { id: 'monthly', price: platformPrice },
-    { id: 'yearly',  price: yearlyPrice }
-  ];
 
   try {
     const res = await fetch(`${API_BASE}/subscriptions/plans`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ platformPrice, platformPlans, tiers })
+      body: JSON.stringify({ platformPrice, fleetTiers })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error || 'Failed to save pricing');
@@ -1649,8 +1692,6 @@ function renderVehicleSubscriptionPanel() {
   if (!panel || !state.plans) return;
 
   const editing = Boolean(state.editingVehicleId);
-  const type = document.getElementById('vehicle-type').value;
-  const tier = tierForVehicle();
 
   const labelEl = document.getElementById('vehicle-sub-tier-label');
   const seatsEl = document.getElementById('vehicle-sub-tier-seats');
@@ -1658,42 +1699,61 @@ function renderVehicleSubscriptionPanel() {
   const noteEl  = document.getElementById('vehicle-sub-note');
   const saveBtn = document.getElementById('modal-save-btn');
 
-  if (!tier) {
+  // Editing never charges — the fleet fee is bought when a vehicle is added and
+  // renewed from the Subscription page — so it shows the plan the fleet is on
+  // rather than a price for this form.
+  if (editing) {
+    const current = fleetSub();
+    const band = fleetTierFor(fleetSize());
+    panel.classList.remove('is-invalid');
+    saveBtn.disabled = false;
+    labelEl.textContent = band ? `${band.label} fleet plan` : 'Fleet plan';
+    seatsEl.textContent = `${fleetSize()} vehicle${fleetSize() === 1 ? '' : 's'} covered`;
+    priceEl.textContent = band ? `${money(band.price)}/${period()}` : '—';
+    noteEl.textContent = current?.status === 'active'
+      ? `Covered until ${formatDate(current.expiresAt)}. Updating these details does not change the fee.`
+      : 'Updating these details does not change the fee. Pay it from the Subscription page.';
+    saveBtn.textContent = 'Update Vehicle';
+    return;
+  }
+
+  const cost = costToAddVehicle();
+  if (!cost) {
     panel.classList.add('is-invalid');
-    labelEl.textContent = 'No listing plan configured';
-    seatsEl.textContent = type || '';
+    labelEl.textContent = 'No fleet plan configured';
+    seatsEl.textContent = '';
     priceEl.textContent = '—';
-    noteEl.textContent  = 'No vehicle listing plan is configured. Ask the Super Admin to set one on the Subscription page.';
-    saveBtn.textContent = editing ? 'Update Vehicle' : 'Add Vehicle';
-    // Editing changes details only and never touches the listing fee, so a
-    // missing plan must not block it.
-    saveBtn.disabled = !editing;
+    noteEl.textContent  = 'No fleet plan is configured. Ask the Super Admin to set one on the Subscription page.';
+    saveBtn.textContent = 'Add Vehicle';
+    saveBtn.disabled = true;
     return;
   }
 
   panel.classList.remove('is-invalid');
   saveBtn.disabled = false;
-  labelEl.textContent = `${tier.label} subscription`;
-  seatsEl.textContent = 'Flat fee — any seat count';
-  priceEl.textContent = `${money(tier.price)}/${period()}`;
+  labelEl.textContent = `${cost.tier.label} fleet plan`;
+  seatsEl.textContent = `This would be vehicle #${fleetSize() + 1}`;
 
-  // Editing never charges: the listing fee is bought once when the vehicle is
-  // added, and renewed from the Subscription page. Only the add flow mentions
-  // payment at all.
-  if (editing) {
-    const existing = (state.subscription?.listings || [])
-      .find(l => l.vehicleId === state.editingVehicleId);
-
-    noteEl.textContent = existing?.status === 'active'
-      ? `Listed until ${formatDate(existing.expiresAt)}. Updating these details does not change the subscription.`
-      : 'Updating these details does not change the subscription. Renew it from the Subscription page.';
-    saveBtn.textContent = 'Update Vehicle';
+  // One fee covers the whole fleet, so what this vehicle costs depends on
+  // whether it fits in the band already paid for.
+  if (cost.charge === 0) {
+    priceEl.textContent = 'No extra charge';
+    noteEl.textContent =
+      `Your ${cost.tier.label} plan already covers this vehicle — nothing more to pay. ` +
+      `It goes live in the app straight after.`;
+  } else if (cost.upgrade) {
+    priceEl.textContent = `+${money(cost.charge)}`;
+    noteEl.textContent =
+      `This vehicle moves your fleet up to the ${cost.tier.label} plan ` +
+      `(${money(cost.tier.price)}/${period()}). You pay only the ${money(cost.charge)} difference now; ` +
+      `your renewal date does not change.`;
   } else {
-    // The panel right above already states the fee, so the button just names
-    // the action.
-    noteEl.textContent = `Adding this vehicle charges ${money(tier.price)} for one ${period()}. It goes live in the app straight after.`;
-    saveBtn.textContent = 'Add Vehicle';
+    priceEl.textContent = `${money(cost.charge)}/${period()}`;
+    noteEl.textContent =
+      `Adding this vehicle starts your ${cost.tier.label} fleet plan at ${money(cost.charge)} ` +
+      `for one ${period()}, covering every vehicle you add inside that band.`;
   }
+  saveBtn.textContent = 'Add Vehicle';
 }
 
 function closeVehicleModal() {
@@ -1746,10 +1806,9 @@ async function handleVehicleFormSubmit(e) {
     features
   };
 
-  // Only adding buys a listing, so a missing plan must not block an edit.
-  const tier = tierForVehicle();
-  if (!tier && !id) {
-    return alert('❌ No vehicle listing plan is configured, so this vehicle cannot be listed yet.');
+  // Only adding touches the fleet fee, so a missing plan must not block an edit.
+  if (!id && !fleetTierFor(fleetSize() + 1)) {
+    return alert('❌ No fleet plan is configured, so this vehicle cannot be listed yet.');
   }
 
   const saveBtn = document.getElementById('modal-save-btn');
@@ -1778,26 +1837,31 @@ async function handleVehicleFormSubmit(e) {
       return alert(`✅ ${name} updated.`);
     }
 
-    // Adding: the API buys the listing as part of creating the vehicle and
-    // returns it. Charging it from here as a second request billed the agency
-    // twice for the same bus, and left it saved-but-unlisted whenever the
+    // Adding: the API settles the fleet fee as part of creating the vehicle and
+    // returns the resulting plan. Charging it from here as a second request
+    // billed the agency twice, and left the bus saved-but-unlisted whenever the
     // second request was the one that failed.
     closeVehicleModal();
     await loadData();
 
-    if (!data.listing) {
+    if (!data.fleet) {
       return alert(
-        `⚠️ ${name} was saved, but its listing fee could not be charged, so it is ` +
-        `not visible to travellers yet.\n\n${data.listingWarning || ''}\n\n` +
+        `⚠️ ${name} was saved, but the fleet fee could not be charged, so your ` +
+        `vehicles are not visible to travellers yet.\n\n${data.listingWarning || ''}\n\n` +
         `Pay it from the Subscription page.`
       );
     }
 
+    // `charge` is what was actually billed — zero when the vehicle fitted
+    // inside the band already paid for.
+    const charged = Number(data.fleet.charge || 0);
     return alert(
       `✅ ${name} is live in the app!\n\n` +
-      `Plan: ${data.listing.tierLabel}\n` +
-      `Paid: ${money(tier.price)}\n` +
-      `Listed until: ${formatDate(data.listing.expiresAt)}`
+      `Fleet plan: ${data.fleet.tierLabel}\n` +
+      (charged > 0
+        ? `Charged: ${money(charged)}${data.fleet.upgraded ? ' (upgrade to this band)' : ''}\n`
+        : `Charged: nothing — already covered by your plan\n`) +
+      `Covered until: ${formatDate(data.fleet.expiresAt)}`
     );
   } catch (err) {
     alert('❌ ' + err.message);

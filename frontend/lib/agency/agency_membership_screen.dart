@@ -8,8 +8,7 @@ import 'money.dart';
 /// Where an agency buys and renews its monthly platform membership.
 ///
 /// This lives in the traveller app on purpose: the admin portal shows the
-/// resulting status and expiry read-only, and handles per-vehicle subscriptions
-/// only.
+/// resulting status and expiry read-only, and handles the fleet fee only.
 class AgencyMembershipScreen extends StatefulWidget {
   const AgencyMembershipScreen({super.key, required this.operatorName});
 
@@ -191,8 +190,8 @@ class _AgencyMembershipScreenState extends State<AgencyMembershipScreen> {
             const SizedBox(height: 12),
             const Text(
               'You can now browse every other agency\'s buses. Add your own '
-              'fleet from the admin portal — each vehicle needs its own '
-              'subscription before travellers see it.',
+              'fleet from the admin portal — one fleet fee, priced by how many '
+              'vehicles you run, covers all of them.',
               style: TextStyle(
                 fontSize: 12.5,
                 height: 1.45,
@@ -287,10 +286,9 @@ class _AgencyMembershipScreenState extends State<AgencyMembershipScreen> {
   Widget _content() {
     final platform = _platform;
     final plan = _plans!['platform'] as Map<String, dynamic>;
-    final listings = (_subscription?['listings'] as List<dynamic>? ?? []);
-    final activeListings = listings
-        .where((l) => (l as Map)['status'] == 'active')
-        .length;
+    // One fee covers the whole fleet now, so there is a single plan to report
+    // rather than a count of individually paid vehicles.
+    final fleet = _subscription?['fleet'] as Map<String, dynamic>?;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
@@ -394,8 +392,15 @@ class _AgencyMembershipScreenState extends State<AgencyMembershipScreen> {
                           : '—',
                     ),
                     _row(
-                      'Vehicles listed',
-                      '$activeListings / ${listings.length}',
+                      'Fleet plan',
+                      fleet == null
+                          ? 'Not paid'
+                          : '${fleet['tierLabel']}'
+                                '${fleet['status'] == 'active' ? '' : ' (expired)'}',
+                    ),
+                    _row(
+                      'Vehicles covered',
+                      fleet == null ? '—' : '${fleet['vehicleCount'] ?? 0}',
                     ),
                   ],
                 ),

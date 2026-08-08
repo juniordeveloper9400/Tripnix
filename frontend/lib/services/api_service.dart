@@ -329,7 +329,7 @@ class ApiService {
     return body;
   }
 
-  /// Current platform membership and vehicle listings for an agency.
+  /// Current platform membership and fleet plan for an agency.
   Future<Map<String, dynamic>> fetchSubscription(String operatorName) async {
     final response = await http.get(
       Uri.parse('$baseUrl/subscriptions?operatorName=${Uri.encodeComponent(operatorName)}'),

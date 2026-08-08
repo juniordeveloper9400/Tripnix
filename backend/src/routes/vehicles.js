@@ -3,10 +3,9 @@ import {
   hasActivePlatformMembership,
   isVehiclePubliclyListed,
   listedAgencies,
-  activateVehicleListing,
-  removeListingForVehicle,
+  activateFleetSubscription,
   refreshSubscriptionsFromDb,
-  tierForVehicle
+  fleetTierFor
 } from "./subscriptions.js";
 import {
   removeTripsForVehicle,
@@ -265,9 +264,13 @@ router.post("/", async (req, res) => {
     });
   }
 
-  const tier = tierForVehicle();
+  // The fleet fee is priced by how many vehicles the agency will have once
+  // this one is added, so the band is worked out from the new size.
+  const fleetSizeAfter =
+    vehicles.filter((v) => v.operatorName.toLowerCase() === owner.toLowerCase()).length + 1;
+  const tier = fleetTierFor(fleetSizeAfter);
   if (!tier) {
-    return res.status(400).json({ error: "No vehicle listing plan is configured" });
+    return res.status(400).json({ error: "No fleet plan is configured" });
   }
 
   let id;
@@ -321,28 +324,30 @@ router.post("/", async (req, res) => {
     }
   }
 
-  // Adding a vehicle buys its first month of listing — this is the charge the
-  // admin portal quotes on the Save button. Until a payment gateway exists,
-  // the add itself stands in for the payment; when one arrives, only this call
+  // One fee covers the whole fleet, so adding a vehicle charges nothing while
+  // the fleet stays inside its paid band, and only the difference up to the
+  // next band's price when it crosses one. Until a payment gateway exists the
+  // add itself stands in for the payment; when one arrives, only this call
   // moves behind its confirmation.
-  let listing = null;
+  let fleet = null;
   try {
-    listing = await activateVehicleListing(owner, newVehicle);
+    fleet = await activateFleetSubscription(owner, fleetSizeAfter);
   } catch (e) {
-    // The bus is saved but unlisted rather than lost. It stays invisible to
-    // travellers until the fee is settled from the Subscription page, which is
-    // recoverable — deleting the vehicle here would not be.
-    console.error("Vehicle listing activation error:", e);
+    // The bus is saved but the fleet is unlisted rather than lost. It stays
+    // invisible to travellers until the fee is settled from the Subscription
+    // page, which is recoverable — deleting the vehicle here would not be.
+    console.error("Fleet subscription activation error:", e);
     return res.status(201).json({
       ...newVehicle,
-      listing: null,
+      fleet: null,
       listingWarning:
-        `${newVehicle.name} was saved, but its ${tier.label} listing fee could not be ` +
-        "recorded, so it is not visible to travellers yet. Renew it from the Subscription page."
+        `${newVehicle.name} was saved, but the ${tier.label} fleet fee could not be ` +
+        "recorded, so your vehicles are not visible to travellers yet. " +
+        "Pay it from the Subscription page."
     });
   }
 
-  res.status(201).json({ ...newVehicle, listing });
+  res.status(201).json({ ...newVehicle, fleet });
 });
 
 // PUT /api/vehicles/:id
@@ -400,7 +405,9 @@ router.delete("/:id", async (req, res) => {
 
   vehicles = vehicles.filter((v) => v.id !== id);
   await removeTripsForVehicle(id);
-  await removeListingForVehicle(id);
+  // The fleet fee is not per vehicle, so removing one does not cancel anything.
+  // The agency keeps the band it paid for until the subscription is renewed, at
+  // which point it renews at whatever band its fleet size is by then.
 
   if (databaseConfigured) {
     try {

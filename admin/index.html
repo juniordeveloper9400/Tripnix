@@ -426,11 +426,11 @@
             </div>
           </div>
 
-          <!-- Step 2 — Per-vehicle listing fees -->
+          <!-- Step 2 — Fleet fee, priced by how many vehicles the agency runs -->
           <div class="panel-card">
             <div class="panel-header">
-              <h3>Vehicle Listing Plan</h3>
-              <span class="panel-header-note">One flat fee per vehicle — bus, traveller or car</span>
+              <h3>Fleet Plan</h3>
+              <span class="panel-header-note">One fee covers your whole fleet — priced by how many vehicles you run</span>
             </div>
             <div class="panel-body">
               <div class="plan-grid" id="plan-grid"></div>
@@ -449,7 +449,7 @@
                   <thead>
                     <tr>
                       <th>Vehicle</th><th>Number</th><th>Type</th><th>Seats</th>
-                      <th>Monthly Fee</th><th>Status</th><th>Action</th>
+                      <th>Fee</th><th>Status</th><th>Action</th>
                     </tr>
                   </thead>
                   <tbody id="listings-tbody"></tbody>
@@ -465,12 +465,8 @@
               <div class="panel-body">
                 <form id="pricing-form">
                   <div class="form-group">
-                    <label for="price-platform">Platform Membership <small style="color:var(--text-muted);">(1 month)</small></label>
+                    <label for="price-platform" id="price-platform-label">Platform membership</label>
                     <input type="number" id="price-platform" min="0" step="1" required />
-                  </div>
-                  <div class="form-group">
-                    <label for="price-platform-yearly">Platform Membership <small style="color:var(--text-muted);">(1 year)</small></label>
-                    <input type="number" id="price-platform-yearly" min="0" step="1" required />
                   </div>
                   <div id="tier-price-inputs"></div>
                   <button type="submit" class="btn btn-primary btn-full">💾 Save Pricing</button>
@@ -486,7 +482,7 @@
                     <thead>
                       <tr>
                         <th>Travel Agency</th><th>Membership</th><th>Expires</th>
-                        <th>Listed Vehicles</th><th>Total Paid</th>
+                        <th>Fleet Plan</th><th>Total Paid</th>
                       </tr>
                     </thead>
                     <tbody id="agency-subs-tbody"></tbody>
