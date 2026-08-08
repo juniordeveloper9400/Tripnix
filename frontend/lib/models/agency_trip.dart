@@ -35,6 +35,20 @@ class AgencyTrip {
   /// Whether the bus behind this trip still has an active subscription.
   final bool busListed;
 
+  /// When the agency posted this status, ISO-8601. Statuses play in the order
+  /// they were posted, oldest first, so this orders them — not the travel
+  /// dates, which say when the bus runs rather than when the post was made.
+  final String createdAt;
+
+  /// Sorts oldest-posted first. Falls back to [id] for records saved before
+  /// the API sent a timestamp, which still rank in the order they were created.
+  int compareByPosted(AgencyTrip other) {
+    final a = DateTime.tryParse(createdAt);
+    final b = DateTime.tryParse(other.createdAt);
+    if (a != null && b != null) return a.compareTo(b);
+    return id.compareTo(other.id);
+  }
+
   const AgencyTrip({
     required this.id,
     required this.operatorName,
@@ -50,6 +64,7 @@ class AgencyTrip {
     required this.note,
     required this.status,
     required this.busListed,
+    this.createdAt = '',
     this.seats,
   });
 
@@ -70,6 +85,7 @@ class AgencyTrip {
       note: json['note'] as String? ?? '',
       status: json['status'] as String? ?? 'Scheduled',
       busListed: json['busListed'] as bool? ?? false,
+      createdAt: json['createdAt'] as String? ?? '',
     );
   }
 

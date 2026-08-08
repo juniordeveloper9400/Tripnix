@@ -4,7 +4,7 @@ import '../../agency/agency_session.dart';
 import '../../models/agency_trip.dart';
 import '../../theme/app_colors.dart';
 import '../add_trip_status_screen.dart';
-import '../trip_detail_sheet.dart';
+import '../status_story_viewer.dart';
 
 /// Horizontal row of trips posted by agencies against their buses. Sits at the
 /// very top of the Explore screen, in place of the old sample stories.
@@ -50,9 +50,8 @@ class TripsBar extends StatelessWidget {
     final own = AgencySession.instance.operatorName.trim().toLowerCase();
     final mine = own.isEmpty
         ? const <AgencyTrip>[]
-        : trips
-              .where((t) => t.operatorName.trim().toLowerCase() == own)
-              .toList();
+        : (trips.where((t) => t.operatorName.trim().toLowerCase() == own).toList()
+            ..sort((a, b) => a.compareByPosted(b)));
     final others = trips
         .where((t) => t.operatorName.trim().toLowerCase() != own)
         .toList();
@@ -71,7 +70,21 @@ class TripsBar extends StatelessWidget {
           final trip = others[index - 1];
           return _TripTile(
             trip: trip,
-            onTap: () => showTripDetailSheet(context, trip),
+            // Opens that agency's statuses and plays them in the order they
+            // were posted, starting from the one tapped.
+            onTap: () {
+              final agency = trip.operatorName.trim().toLowerCase();
+              final theirs =
+                  trips
+                      .where((t) => t.operatorName.trim().toLowerCase() == agency)
+                      .toList()
+                    ..sort((a, b) => a.compareByPosted(b));
+              showStatusStory(
+                context,
+                theirs,
+                initialIndex: theirs.indexWhere((t) => t.id == trip.id),
+              );
+            },
           );
         },
       ),
@@ -89,13 +102,13 @@ class _AddStatusTile extends StatelessWidget {
 
   final Future<void> Function() onAdded;
 
-  /// This agency's own live statuses, most current first. Empty until they
-  /// post one from the admin portal or the + below.
+  /// This agency's own live statuses, oldest posted first — the order they
+  /// play in. Empty until they post one from the admin portal or the + below.
   final List<AgencyTrip> mine;
 
-  /// The status the tile shows. The list arrives ranked by the API, so the
-  /// first is the one running now, or the next one due.
-  AgencyTrip? get _featured => mine.isEmpty ? null : mine.first;
+  /// The status shown on the tile. The newest post is the one worth showing as
+  /// the cover, even though playback starts from the oldest.
+  AgencyTrip? get _featured => mine.isEmpty ? null : mine.last;
 
   Future<void> _open(BuildContext context) async {
     final posted = await Navigator.of(context).push<bool>(
@@ -104,118 +117,14 @@ class _AddStatusTile extends StatelessWidget {
     if (posted == true) await onAdded();
   }
 
-  /// Tapping the card opens what the agency has posted; with nothing posted it
-  /// goes straight to the form. More than one opens the list, so a second and
-  /// third status stay reachable from the single tile.
+  /// Tapping the card plays the agency's own statuses from the first one
+  /// posted through to the latest; with nothing posted it opens the form.
   void _openOwn(BuildContext context) {
     if (mine.isEmpty) {
       _open(context);
       return;
     }
-    if (mine.length == 1) {
-      showTripDetailSheet(context, mine.first);
-      return;
-    }
-    _showOwnStatusList(context);
-  }
-
-  void _showOwnStatusList(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
-      ),
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 12),
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.black12,
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-              child: Row(
-                children: [
-                  const Expanded(
-                    child: Text(
-                      'Your trip statuses',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ),
-                  Text(
-                    '${mine.length}',
-                    style: TextStyle(fontSize: 13, color: Colors.grey[600]),
-                  ),
-                ],
-              ),
-            ),
-            Flexible(
-              child: ListView.separated(
-                shrinkWrap: true,
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                itemCount: mine.length,
-                separatorBuilder: (_, _) => const Divider(height: 1),
-                itemBuilder: (_, index) {
-                  final trip = mine[index];
-                  return ListTile(
-                    leading: ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
-                      child: SizedBox(
-                        width: 52,
-                        height: 44,
-                        child: _buildTileImage(trip.imageUrl),
-                      ),
-                    ),
-                    title: Text(
-                      trip.place,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    subtitle: Text(
-                      '${trip.departureLabel} → ${trip.arrivalLabel}',
-                      style: const TextStyle(fontSize: 11.5),
-                    ),
-                    trailing: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: trip.statusColor,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        trip.status.toUpperCase(),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 8.5,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ),
-                    onTap: () {
-                      Navigator.of(sheetContext).pop();
-                      showTripDetailSheet(context, trip);
-                    },
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    showStatusStory(context, mine);
   }
 
   @override

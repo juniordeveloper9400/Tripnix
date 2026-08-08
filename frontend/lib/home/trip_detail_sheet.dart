@@ -5,8 +5,11 @@ import '../theme/app_colors.dart';
 
 /// Full detail for a posted trip: image, agency, place, the start/end date window
 /// and the bus it runs on, with its live status.
-void showTripDetailSheet(BuildContext context, AgencyTrip trip) {
-  showModalBottomSheet<void>(
+///
+/// Returns when the sheet closes, so a caller that paused something to show it
+/// — the story viewer pauses playback — knows when to resume.
+Future<void> showTripDetailSheet(BuildContext context, AgencyTrip trip) {
+  return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,

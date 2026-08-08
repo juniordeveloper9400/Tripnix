@@ -214,6 +214,9 @@ router.get("/fleet-status", async (req, res) => {
     imageUrl: trip.imageUrl || (vehicle.imageUrls && vehicle.imageUrls[0]) || "",
     note: trip.note,
     status: trip.status,
+    // When the status was posted. The app plays statuses in the order they were
+    // added, oldest first, so it needs this rather than the travel dates.
+    createdAt: trip.createdAt || "",
     busListed: true
   });
 
