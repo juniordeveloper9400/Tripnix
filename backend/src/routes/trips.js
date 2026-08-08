@@ -81,13 +81,18 @@ function decorate(trip) {
   };
 }
 
-/// Strips the traveller's contact details off a booking-derived trip.
+/// Strips private detail off anything that is not an agency's public status.
 ///
 /// Anyone can read the public feed and a vehicle's schedule, so those views
-/// show only *that* the bus is taken — never who took it.
+/// show only *that* the bus is taken — never who took it or where.
+///
+/// The test is deliberately positive: only an entry with no `kind` is a public
+/// trip status. Listing the private kinds instead meant every new one had to
+/// remember to add itself here, and a diary order — which carries a customer's
+/// name, phone and fare — would have been published by forgetting to.
 export function redactTrip(trip) {
-  const { customerName, customerPhone, ...rest } = trip;
-  if (trip.kind !== "booking") return rest;
+  const { customerName, customerPhone, fare, ...rest } = trip;
+  if (!trip.kind) return rest;
   return {
     ...rest,
     place: "Booked",
@@ -233,9 +238,10 @@ router.get("/fleet-status", async (req, res) => {
         .filter((t) => Number(t.vehicleId) === Number(vehicle.id))
         .map(decorate)
         .filter((t) => t.status !== "Completed")
-        // Customer bookings keep the bus busy but are not advertised: a tile
-        // per booking would publish on which dates a stranger booked it.
-        .filter((t) => t.kind !== "booking")
+        // Only an agency's own posted statuses are advertised. Bookings and
+        // diary orders keep the bus busy but are private: a tile for one would
+        // publish on which dates a named customer took it.
+        .filter((t) => !t.kind)
         .sort((a, b) => String(a.departureDate).localeCompare(String(b.departureDate)))
         .map((t) => row(vehicle, t))
     );
@@ -353,6 +359,192 @@ router.post("/", async (req, res) => {
   }
 
   res.status(201).json(decorate(trip));
+});
+
+/// Validates the body of a diary order and returns either an error string or
+/// the cleaned fields.
+/// The bus an entry is against is fixed when it is written, so this covers only
+/// the fields both creating and correcting an entry share.
+function readDiaryBody(body) {
+  const { customerName, departureDate, arrivalDate } = body;
+
+  if (!customerName || !String(customerName).trim()) {
+    return { error: "customerName is required" };
+  }
+  if (!departureDate || !arrivalDate) {
+    return { error: "departureDate and arrivalDate are required" };
+  }
+
+  const departure = parseDate(departureDate);
+  const arrival = parseDate(arrivalDate);
+  if (!departure || !arrival) {
+    return { error: "Dates must be in YYYY-MM-DD format" };
+  }
+  if (arrival < departure) {
+    return { error: "Arrival date cannot be before the departure date" };
+  }
+
+  const fare = body.fare === undefined || body.fare === null || body.fare === ""
+    ? 0
+    : Number(body.fare);
+  if (!Number.isFinite(fare) || fare < 0) {
+    return { error: "fare must be a positive number" };
+  }
+
+  return {
+    fields: {
+      customerName: String(customerName).trim(),
+      customerPhone: String(body.customerPhone || "").trim(),
+      place: String(body.place || "").trim(),
+      departureDate: String(departureDate).trim(),
+      arrivalDate: String(arrivalDate).trim(),
+      note: String(body.note || "").trim(),
+      fare
+    }
+  };
+}
+
+/// Any date in one entry's window that is already taken by another.
+///
+/// The diary's whole job is to stop a bus being promised twice, so an overlap
+/// is reported rather than silently written.
+function clashingEntry(vehicleId, departureDate, arrivalDate, ignoreId) {
+  const from = parseDate(departureDate).getTime();
+  const to = parseDate(arrivalDate).getTime();
+
+  return trips.find((t) => {
+    if (Number(t.vehicleId) !== Number(vehicleId)) return false;
+    if (ignoreId !== undefined && Number(t.id) === Number(ignoreId)) return false;
+    const start = parseDate(t.departureDate);
+    const end = parseDate(t.arrivalDate);
+    if (!start || !end) return false;
+    return start.getTime() <= to && end.getTime() >= from;
+  });
+}
+
+// POST /api/trips/diary - an agency writes an order into a bus's diary.
+//
+// Kept private: it carries the customer's name, phone and fare, so it never
+// reaches the public feed — only the fact that the bus is taken does.
+router.post("/diary", async (req, res) => {
+  const { operatorName, vehicleId } = req.body;
+  if (!operatorName || !vehicleId) {
+    return res.status(400).json({ error: "operatorName and vehicleId are required" });
+  }
+
+  const parsed = readDiaryBody(req.body);
+  if (parsed.error) return res.status(400).json({ error: parsed.error });
+
+  await refreshVehiclesFromDb();
+  await refreshTripsFromDb();
+
+  const vehicle = findVehicle(Number(vehicleId));
+  if (!vehicle) return res.status(404).json({ error: "Vehicle not found" });
+  if (
+    vehicle.operatorName.toLowerCase() !== String(operatorName).trim().toLowerCase()
+  ) {
+    return res.status(403).json({ error: "That vehicle belongs to another agency" });
+  }
+
+  const clash = clashingEntry(
+    vehicle.id,
+    parsed.fields.departureDate,
+    parsed.fields.arrivalDate
+  );
+  if (clash) {
+    return res.status(409).json({
+      error:
+        `${vehicle.name} is already taken from ${clash.departureDate} to ${clash.arrivalDate}. ` +
+        "Pick dates that are free, or remove the entry that clashes.",
+      clashesWith: decorate(clash).id
+    });
+  }
+
+  let id;
+  try {
+    id = await reserveTripId();
+  } catch (e) {
+    console.error("Diary id allocation error:", e);
+    return res.status(503).json({ error: "Could not save this entry. Please try again." });
+  }
+
+  const entry = {
+    id,
+    kind: "diary",
+    operatorName: vehicle.operatorName,
+    vehicleId: vehicle.id,
+    vehicleName: vehicle.name,
+    vehicleNumber: vehicle.vehicleNumber,
+    vehicleType: vehicle.type,
+    imageUrl: (vehicle.imageUrls && vehicle.imageUrls[0]) || "",
+    ...parsed.fields,
+    createdAt: new Date().toISOString()
+  };
+
+  trips.push(entry);
+
+  if (databaseConfigured) {
+    try {
+      await tripsRef().child(String(entry.id)).set(entry);
+    } catch (e) {
+      console.error("Database save diary entry error:", e);
+      trips = trips.filter((t) => t.id !== entry.id);
+      const described = describeDatabaseError(e);
+      return res.status(described?.status || 503).json({
+        error: described?.message || `Could not save this entry: ${e.message}`
+      });
+    }
+  }
+
+  res.status(201).json(decorate(entry));
+});
+
+// PUT /api/trips/diary/:id - correct an order already in the diary
+router.put("/diary/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  const parsed = readDiaryBody(req.body);
+  if (parsed.error) return res.status(400).json({ error: parsed.error });
+
+  await refreshVehiclesFromDb();
+  await refreshTripsFromDb();
+
+  const index = trips.findIndex((t) => Number(t.id) === id);
+  if (index === -1) return res.status(404).json({ error: "Diary entry not found" });
+  if (trips[index].kind !== "diary") {
+    return res.status(400).json({
+      error: "Only entries written into the diary can be edited here."
+    });
+  }
+
+  const clash = clashingEntry(
+    trips[index].vehicleId,
+    parsed.fields.departureDate,
+    parsed.fields.arrivalDate,
+    id
+  );
+  if (clash) {
+    return res.status(409).json({
+      error:
+        `That bus is already taken from ${clash.departureDate} to ${clash.arrivalDate}. ` +
+        "Pick dates that are free."
+    });
+  }
+
+  trips[index] = { ...trips[index], ...parsed.fields };
+
+  if (databaseConfigured) {
+    try {
+      await tripsRef().child(String(id)).update(parsed.fields);
+    } catch (e) {
+      console.error("Database update diary entry error:", e);
+      const described = describeDatabaseError(e);
+      return res.status(described?.status || 503).json({
+        error: described?.message || `Could not save this entry: ${e.message}`
+      });
+    }
+  }
+
+  res.json(decorate(trips[index]));
 });
 
 // DELETE /api/trips/:id

@@ -379,6 +379,7 @@
               <div class="panel-header">
                 <h3 id="diary-vehicle-title">Schedule</h3>
                 <span class="panel-header-note" id="diary-vehicle-sub"></span>
+                <button id="diary-add-btn" class="btn btn-primary btn-sm">➕ Add Entry</button>
               </div>
               <div class="panel-body">
                 <div class="diary-summary" id="diary-summary"></div>
@@ -393,6 +394,9 @@
                 <p class="diary-legend">
                   <span class="diary-dot is-booked"></span> Booked
                   <span class="diary-dot is-free"></span> Free
+                </p>
+                <p class="diary-legend" style="margin-top:4px;">
+                  Tap a free day to write an order for it.
                 </p>
               </div>
             </div>
@@ -720,6 +724,106 @@
         <div class="modal-footer">
           <button type="button" id="modal-cancel-btn" class="btn btn-secondary">Cancel</button>
           <button type="submit" id="modal-save-btn" class="btn btn-primary">Add Vehicle</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Payment step, shown before anything is charged -->
+  <div id="payment-modal" class="modal-backdrop hidden">
+    <div class="modal-card modal-card-narrow">
+      <div class="modal-header">
+        <h3 id="payment-title">Confirm Payment</h3>
+        <button id="payment-close" class="close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="pay-lead" id="payment-lead"></p>
+        <div class="pay-plan" id="payment-plan"></div>
+        <dl class="pay-lines" id="payment-lines"></dl>
+        <div class="pay-total">
+          <span>Payable now</span>
+          <strong id="payment-total">—</strong>
+        </div>
+        <p class="pay-note" id="payment-note"></p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="payment-cancel" class="btn btn-secondary">Cancel</button>
+        <button type="button" id="payment-confirm" class="btn btn-primary">Pay &amp; Continue</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- In-app notice, used instead of a browser alert for payment outcomes -->
+  <div id="notice-modal" class="modal-backdrop hidden">
+    <div class="modal-card modal-card-narrow">
+      <div class="modal-body notice-body">
+        <div class="notice-icon" id="notice-icon">✅</div>
+        <h3 class="notice-title" id="notice-title"></h3>
+        <p class="notice-lead" id="notice-lead"></p>
+        <dl class="pay-lines" id="notice-lines"></dl>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="notice-ok" class="btn btn-primary btn-full">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bus Diary — write an order against a bus by hand -->
+  <div id="diary-modal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="diary-modal-title">New Diary Entry</h3>
+        <button id="diary-modal-close" class="close-btn">&times;</button>
+      </div>
+      <form id="diary-form" class="modal-body">
+        <input type="hidden" id="diary-entry-id" />
+
+        <p class="panel-header-note" id="diary-modal-bus" style="margin-bottom:14px;"></p>
+
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label for="diary-customer">Customer Name *</label>
+            <input type="text" id="diary-customer" placeholder="Who booked the bus" required />
+          </div>
+          <div class="form-group flex-1">
+            <label for="diary-phone">Phone</label>
+            <input type="tel" id="diary-phone" placeholder="e.g. 98765 43210" />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="diary-place">Trip / Route</label>
+          <input type="text" id="diary-place" placeholder="e.g. Kochi → Munnar, wedding party" />
+        </div>
+
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label for="diary-from">From *</label>
+            <input type="date" id="diary-from" required />
+          </div>
+          <div class="form-group flex-1">
+            <label for="diary-to">To *</label>
+            <input type="date" id="diary-to" required />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="diary-fare">Fare Agreed (₹)</label>
+          <input type="number" id="diary-fare" min="0" step="1" placeholder="0" />
+        </div>
+
+        <div class="form-group">
+          <label for="diary-note">Notes</label>
+          <textarea id="diary-note" rows="3" placeholder="Pickup point, advance paid, driver, anything worth remembering"></textarea>
+        </div>
+
+        <p class="panel-header-note">
+          🔒 Kept private to your agency — travellers only see that the bus is taken on these dates.
+        </p>
+
+        <div class="modal-footer">
+          <button type="button" id="diary-modal-cancel" class="btn btn-secondary">Cancel</button>
+          <button type="submit" id="diary-save-btn" class="btn btn-primary">Save Entry</button>
         </div>
       </form>
     </div>

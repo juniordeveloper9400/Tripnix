@@ -283,6 +283,18 @@ function setupEventListeners() {
   modalCloseBtn.addEventListener('click', closeVehicleModal);
   modalCancelBtn.addEventListener('click', closeVehicleModal);
 
+  // Bus Diary — the order book.
+  document.getElementById('diary-add-btn')?.addEventListener('click', () => openDiaryModal());
+  document.getElementById('diary-modal-close')?.addEventListener('click', closeDiaryModal);
+  document.getElementById('diary-modal-cancel')?.addEventListener('click', closeDiaryModal);
+  document.getElementById('diary-form')?.addEventListener('submit', handleDiarySubmit);
+  // Keeping "to" at or after "from" stops the API rejecting a backwards range
+  // after the agency has typed the whole entry.
+  document.getElementById('diary-from')?.addEventListener('change', e => {
+    const to = document.getElementById('diary-to');
+    if (to && (!to.value || to.value < e.target.value)) to.value = e.target.value;
+  });
+
   document.querySelectorAll('.filter-chips .chip').forEach(chip => {
     chip.addEventListener('click', () => {
       document.querySelectorAll('.filter-chips .chip').forEach(c => c.classList.remove('active'));
@@ -679,15 +691,19 @@ function renderDiaryList() {
 
   const upcoming = d.entries.filter(e => e.status !== 'Completed');
 
+  const orders = d.entries.filter(e => e.kind === 'diary');
+  const earned = orders.reduce((sum, e) => sum + Number(e.fare || 0), 0);
+
   if (summary) {
     summary.innerHTML = `
       <div class="diary-stat"><strong>${upcoming.length}</strong><span>Scheduled</span></div>
       <div class="diary-stat"><strong>${d.bookedDates.length}</strong><span>Days booked</span></div>
-      <div class="diary-stat"><strong>${d.entries.filter(e => e.kind === 'booking').length}</strong><span>From bookings</span></div>`;
+      <div class="diary-stat"><strong>${orders.length}</strong><span>Orders</span></div>
+      <div class="diary-stat"><strong>${money(earned)}</strong><span>Fares booked</span></div>`;
   }
 
   if (!d.entries.length) {
-    el.innerHTML = '<p class="diary-empty">Nothing scheduled for this bus yet. Post a trip from the Trips tab, or wait for a customer booking.</p>';
+    el.innerHTML = '<p class="diary-empty">Nothing in this bus\'s diary yet. Use ➕ Add Entry to write an order, or tap a free day on the calendar.</p>';
     return;
   }
 
@@ -695,11 +711,38 @@ function renderDiaryList() {
     const statusClass = e.status === 'On Trip' ? 'confirmed'
       : e.status === 'Completed' ? 'cancelled' : 'pending';
 
-    // Booking entries carry the traveller's details; agency-posted trips carry
-    // a destination and note instead.
-    const who = e.kind === 'booking'
-      ? `<div class="diary-row-who">👤 ${escapeHtml(e.customerName || 'Customer')}${e.customerPhone ? ` · <a href="tel:${escapeHtml(e.customerPhone)}">${escapeHtml(e.customerPhone)}</a>` : ''}</div>`
-      : (e.note ? `<div class="diary-row-who">${escapeHtml(e.note)}</div>` : '');
+    // Three kinds share this list: orders written here by hand, bookings that
+    // came in from the app, and the agency's own public trip statuses. Only the
+    // first is editable — the others are records of something that happened.
+    const isOrder = e.kind === 'diary';
+    const contact = e.customerPhone
+      ? ` · <a href="tel:${escapeHtml(e.customerPhone)}">${escapeHtml(e.customerPhone)}</a>`
+      : '';
+
+    let who = '';
+    if (isOrder || e.kind === 'booking') {
+      who = `<div class="diary-row-who">👤 ${escapeHtml(e.customerName || 'Customer')}${contact}${
+        e.fare ? ` · <strong>${money(e.fare)}</strong>` : ''
+      }</div>`;
+    } else if (e.note) {
+      who = `<div class="diary-row-who">${escapeHtml(e.note)}</div>`;
+    }
+    if (isOrder && e.note) {
+      who += `<div class="diary-row-who" style="color:var(--text-muted);">📝 ${escapeHtml(e.note)}</div>`;
+    }
+
+    const label = isOrder
+      ? '📕 ' + escapeHtml(e.place || 'Order')
+      : e.kind === 'booking'
+        ? '📑 Customer booking'
+        : '🗺️ ' + escapeHtml(e.place || 'Trip');
+
+    const actions = isOrder
+      ? `<div class="diary-row-actions">
+           <button class="btn btn-secondary btn-sm" onclick="editDiaryEntry(${e.id})">✏️</button>
+           <button class="btn btn-secondary btn-sm" style="color:var(--accent-red);" onclick="deleteDiaryEntry(${e.id})">🗑️</button>
+         </div>`
+      : '';
 
     return `
       <div class="diary-row">
@@ -709,13 +752,12 @@ function renderDiaryList() {
           <small>${e.durationDays} day${e.durationDays === 1 ? '' : 's'}</small>
         </div>
         <div class="diary-row-main">
-          <div class="diary-row-place">
-            ${e.kind === 'booking' ? '📑 Customer booking' : '🗺️ ' + escapeHtml(e.place || 'Trip')}
-          </div>
+          <div class="diary-row-place">${label}</div>
           ${who}
         </div>
         <div class="diary-row-status">
           <span class="badge-status ${statusClass}">${escapeHtml(e.status)}</span>
+          ${actions}
         </div>
       </div>`;
   }).join('');
@@ -739,11 +781,26 @@ function renderDiaryCalendar() {
     // Monday-first grid.
     const lead = (first.getDay() + 6) % 7;
 
+    // What is on each booked day, so hovering a marked square says who has the
+    // bus rather than only that something does.
+    const onDate = iso => (d.entries || [])
+      .filter(e => e.status !== 'Completed' && iso >= e.departureDate && iso <= e.arrivalDate)
+      .map(e => e.kind === 'diary' || e.kind === 'booking'
+        ? `${e.customerName || 'Booked'}${e.place ? ' — ' + e.place : ''}`
+        : (e.place || 'Trip'))
+      .join(' | ');
+
     const cells = [];
     for (let i = 0; i < lead; i++) cells.push('<span class="diary-day is-blank"></span>');
     for (let day = 1; day <= daysInMonth; day++) {
       const iso = `${first.getFullYear()}-${String(first.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      cells.push(`<span class="diary-day${booked.has(iso) ? ' is-booked' : ''}" title="${iso}">${day}</span>`);
+      const taken = booked.has(iso);
+      const title = taken ? `${iso} — ${onDate(iso)}` : `${iso} — free, tap to write an order`;
+      // A free day is the quickest way into the form, prefilled with that date.
+      cells.push(
+        `<span class="diary-day${taken ? ' is-booked' : ''}" title="${escapeHtml(title)}"` +
+        `${taken ? '' : ` role="button" onclick="openDiaryModalForDate('${iso}')"`}>${day}</span>`
+      );
     }
 
     return `
@@ -753,6 +810,113 @@ function renderDiaryCalendar() {
         <div class="diary-grid">${cells.join('')}</div>
       </div>`;
   }).join('');
+}
+
+// ─── Diary entries (the order book) ────────────────────────
+
+/// Opens the order form. Pass an entry to correct one already written, or a
+/// date to start a new one on that day.
+function openDiaryModal(entry = null, prefillDate = null) {
+  const modal = document.getElementById('diary-modal');
+  if (!modal) return;
+
+  if (!state.diaryVehicleId) {
+    return alert('❌ Pick a bus first.');
+  }
+
+  const bus = state.vehicles.find(v => v.id === state.diaryVehicleId);
+  document.getElementById('diary-modal-title').textContent =
+    entry ? 'Edit Diary Entry' : 'New Diary Entry';
+  document.getElementById('diary-modal-bus').textContent = bus
+    ? `📕 ${bus.name} · ${bus.vehicleNumber || '—'}`
+    : '';
+
+  document.getElementById('diary-entry-id').value = entry?.id ?? '';
+  document.getElementById('diary-customer').value = entry?.customerName ?? '';
+  document.getElementById('diary-phone').value    = entry?.customerPhone ?? '';
+  document.getElementById('diary-place').value    = entry?.place ?? '';
+  document.getElementById('diary-from').value     = entry?.departureDate ?? prefillDate ?? '';
+  // A one-day hire is the common case, so "to" starts on the same day.
+  document.getElementById('diary-to').value       = entry?.arrivalDate ?? prefillDate ?? '';
+  document.getElementById('diary-fare').value     = entry?.fare ? String(entry.fare) : '';
+  document.getElementById('diary-note').value     = entry?.note ?? '';
+  document.getElementById('diary-save-btn').textContent = entry ? 'Update Entry' : 'Save Entry';
+
+  modal.classList.remove('hidden');
+  document.getElementById('diary-customer').focus();
+}
+
+function closeDiaryModal() {
+  document.getElementById('diary-modal')?.classList.add('hidden');
+  document.getElementById('diary-form')?.reset();
+}
+
+window.openDiaryModalForDate = function(iso) {
+  openDiaryModal(null, iso);
+};
+
+window.editDiaryEntry = function(id) {
+  const entry = (state.diary?.entries || []).find(e => e.id === id);
+  if (!entry) return;
+  openDiaryModal(entry);
+};
+
+window.deleteDiaryEntry = async function(id) {
+  const entry = (state.diary?.entries || []).find(e => e.id === id);
+  if (!entry) return;
+  if (!confirm(`Remove ${entry.customerName || 'this entry'} (${formatDate(entry.departureDate)} → ${formatDate(entry.arrivalDate)}) from the diary?\n\nThe dates go back to free.`)) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/trips/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('Could not remove this entry');
+    await loadDiaryFor(state.diaryVehicleId);
+  } catch (err) {
+    alert('❌ ' + err.message);
+  }
+};
+
+async function handleDiarySubmit(e) {
+  e.preventDefault();
+
+  const id = document.getElementById('diary-entry-id').value;
+  const payload = {
+    operatorName: state.currentUser?.operatorName,
+    vehicleId: state.diaryVehicleId,
+    customerName: document.getElementById('diary-customer').value.trim(),
+    customerPhone: document.getElementById('diary-phone').value.trim(),
+    place: document.getElementById('diary-place').value.trim(),
+    departureDate: document.getElementById('diary-from').value,
+    arrivalDate: document.getElementById('diary-to').value,
+    fare: document.getElementById('diary-fare').value,
+    note: document.getElementById('diary-note').value.trim()
+  };
+
+  const saveBtn = document.getElementById('diary-save-btn');
+  const original = saveBtn.textContent;
+  saveBtn.disabled = true;
+  saveBtn.textContent = 'Saving…';
+
+  try {
+    const res = await fetch(
+      id ? `${API_BASE}/trips/diary/${id}` : `${API_BASE}/trips/diary`,
+      {
+        method: id ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }
+    );
+    const data = await res.json().catch(() => null);
+    // 409 is a double-booking: the API names the dates that clash.
+    if (!res.ok) throw new Error(data?.error || 'Could not save this entry');
+
+    closeDiaryModal();
+    await loadDiaryFor(state.diaryVehicleId);
+  } catch (err) {
+    alert('❌ ' + err.message);
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = original;
+  }
 }
 
 async function loadTrips() {
@@ -983,6 +1147,85 @@ function fleetSub() {
 
 function isFleetActive() {
   return fleetSub()?.status === 'active';
+}
+
+// ─── Payment step & in-app notices ─────────────────────────
+
+/// Shows the payment step and resolves true when the agency confirms.
+///
+/// Used instead of a browser confirm() so buying a plan from the portal looks
+/// and reads the same as paying the platform fee does on the Tripnix site:
+/// what the plan is, what it costs, and what is payable right now.
+function confirmPayment({ title, lead, planName, planSub, planPrice, lines = [], total, note, actionLabel }) {
+  return new Promise(resolve => {
+    const modal = document.getElementById('payment-modal');
+    if (!modal) return resolve(true);
+
+    document.getElementById('payment-title').textContent = title;
+    document.getElementById('payment-lead').textContent = lead || '';
+    document.getElementById('payment-plan').innerHTML = `
+      <div>
+        <span class="pay-plan-name">${escapeHtml(planName)}</span>
+        <span class="pay-plan-sub">${escapeHtml(planSub || '')}</span>
+      </div>
+      <div>
+        <span class="pay-plan-price">${planPrice}</span>
+        <span class="pay-plan-period">per ${escapeHtml(period())}</span>
+      </div>`;
+    document.getElementById('payment-lines').innerHTML = lines
+      .map(l => `<div><dt>${escapeHtml(l.label)}</dt><dd>${l.value}</dd></div>`)
+      .join('');
+    document.getElementById('payment-total').textContent = total;
+    document.getElementById('payment-note').textContent =
+      note || 'No card is charged yet — the payment gateway is being connected. Confirming records this payment against your agency.';
+
+    const confirmBtn = document.getElementById('payment-confirm');
+    confirmBtn.textContent = actionLabel || 'Pay & Continue';
+
+    // Listeners are rebound each time and removed on close, so a second
+    // payment never fires the previous one's resolver as well.
+    const close = answer => {
+      modal.classList.add('hidden');
+      confirmBtn.removeEventListener('click', onConfirm);
+      document.getElementById('payment-cancel').removeEventListener('click', onCancel);
+      document.getElementById('payment-close').removeEventListener('click', onCancel);
+      resolve(answer);
+    };
+    const onConfirm = () => close(true);
+    const onCancel = () => close(false);
+
+    confirmBtn.addEventListener('click', onConfirm);
+    document.getElementById('payment-cancel').addEventListener('click', onCancel);
+    document.getElementById('payment-close').addEventListener('click', onCancel);
+
+    modal.classList.remove('hidden');
+  });
+}
+
+/// An in-app notice, in place of a browser alert.
+function showNotice({ icon = '✅', title, lead, lines = [], actionLabel = 'Done' }) {
+  return new Promise(resolve => {
+    const modal = document.getElementById('notice-modal');
+    if (!modal) { alert(`${title}\n\n${lead || ''}`); return resolve(); }
+
+    document.getElementById('notice-icon').textContent = icon;
+    document.getElementById('notice-title').textContent = title;
+    document.getElementById('notice-lead').textContent = lead || '';
+    document.getElementById('notice-lines').innerHTML = lines
+      .map(l => `<div><dt>${escapeHtml(l.label)}</dt><dd>${l.value}</dd></div>`)
+      .join('');
+
+    const ok = document.getElementById('notice-ok');
+    ok.textContent = actionLabel;
+
+    const close = () => {
+      modal.classList.add('hidden');
+      ok.removeEventListener('click', close);
+      resolve();
+    };
+    ok.addEventListener('click', close);
+    modal.classList.remove('hidden');
+  });
 }
 
 /// What adding one more vehicle costs today: nothing while the fleet stays in
@@ -1280,10 +1523,25 @@ window.payFleetFee = async function() {
   if (!band) return alert('❌ No fleet plan is configured.');
 
   const renewing = isFleetActive();
-  const question = renewing
-    ? `Renew the ${band.label} fleet plan for another ${period()}?\n\nCovers all ${fleetSize()} of your vehicles.\nAmount: ${money(band.price)}`
-    : `Confirm payment of ${money(band.price)} for the ${band.label} fleet plan?\n\nIt covers all ${fleetSize()} of your vehicles for 1 ${period()}.`;
-  if (!confirm(question)) return;
+  const confirmed = await confirmPayment({
+    title: renewing ? 'Renew Fleet Plan' : 'Confirm Payment',
+    lead: renewing
+      ? `Extends your fleet plan by another ${period()} from its current expiry.`
+      : `One fee covers every vehicle you run — priced by how many that is.`,
+    planName: `${band.label} fleet plan`,
+    planSub: `Covers all ${fleetSize()} of your vehicle${fleetSize() === 1 ? '' : 's'}`,
+    planPrice: money(band.price),
+    lines: [
+      { label: 'Plan price', value: `${money(band.price)} / ${period()}` },
+      { label: 'Vehicles covered', value: String(fleetSize()) },
+      ...(renewing
+        ? [{ label: 'Extends from', value: formatDate(fleetSub()?.expiresAt) }]
+        : [])
+    ],
+    total: money(band.price),
+    actionLabel: renewing ? `Renew · ${money(band.price)}` : `Pay ${money(band.price)}`
+  });
+  if (!confirmed) return;
 
   try {
     const res = await fetch(`${API_BASE}/subscriptions/fleet`, {
@@ -1300,11 +1558,19 @@ window.payFleetFee = async function() {
     renderFleetGrid();
     renderTripVehicleOptions();
 
-    alert(
-      `✅ Your fleet is listed!\n\n` +
-      `Plan: ${data.tierLabel}\nCovers: ${fleetSize()} vehicle${fleetSize() === 1 ? '' : 's'}\n` +
-      `Paid: ${money(band.price)}\nValid until: ${formatDate(data.expiresAt)}`
-    );
+    await showNotice({
+      icon: renewing ? '🔄' : '🎉',
+      title: renewing ? 'Fleet plan renewed' : 'Your fleet is listed!',
+      lead: renewing
+        ? 'Your vehicles stay visible to travellers for another period.'
+        : 'Every vehicle in your fleet is now visible to travellers.',
+      lines: [
+        { label: 'Fleet plan', value: escapeHtml(data.tierLabel) },
+        { label: 'Vehicles covered', value: String(fleetSize()) },
+        { label: 'Paid now', value: money(band.price) },
+        { label: 'Covered until', value: formatDate(data.expiresAt) }
+      ]
+    });
   } catch (err) {
     alert('❌ ' + err.message);
   }
@@ -1734,26 +2000,29 @@ function renderVehicleSubscriptionPanel() {
   labelEl.textContent = `${cost.tier.label} fleet plan`;
   seatsEl.textContent = `This would be vehicle #${fleetSize() + 1}`;
 
-  // One fee covers the whole fleet, so what this vehicle costs depends on
-  // whether it fits in the band already paid for.
+  // The band's own price is the headline — "4–6 vehicles · ₹900" is the figure
+  // the agency thinks in. What is payable right now is a separate line, since
+  // moving up a band mid-period only costs the difference.
+  priceEl.textContent = `${money(cost.tier.price)}/${period()}`;
+
   if (cost.charge === 0) {
-    priceEl.textContent = 'No extra charge';
     noteEl.textContent =
-      `Your ${cost.tier.label} plan already covers this vehicle — nothing more to pay. ` +
-      `It goes live in the app straight after.`;
+      `Your ${cost.tier.label} plan (${money(cost.tier.price)}/${period()}) already covers this ` +
+      `vehicle — nothing more to pay. It goes live in the app straight after.`;
   } else if (cost.upgrade) {
-    priceEl.textContent = `+${money(cost.charge)}`;
     noteEl.textContent =
-      `This vehicle moves your fleet up to the ${cost.tier.label} plan ` +
-      `(${money(cost.tier.price)}/${period()}). You pay only the ${money(cost.charge)} difference now; ` +
-      `your renewal date does not change.`;
+      `This vehicle moves your fleet onto the ${cost.tier.label} plan at ` +
+      `${money(cost.tier.price)}/${period()}. You have already paid ${money(cost.tier.price - cost.charge)} ` +
+      `of it, so ${money(cost.charge)} is payable now and your renewal date does not change.`;
   } else {
-    priceEl.textContent = `${money(cost.charge)}/${period()}`;
     noteEl.textContent =
-      `Adding this vehicle starts your ${cost.tier.label} fleet plan at ${money(cost.charge)} ` +
+      `Adding this vehicle starts your ${cost.tier.label} plan at ${money(cost.tier.price)} ` +
       `for one ${period()}, covering every vehicle you add inside that band.`;
   }
-  saveBtn.textContent = 'Add Vehicle';
+
+  saveBtn.textContent = cost.charge > 0
+    ? `Add Vehicle · ${money(cost.charge)}`
+    : 'Add Vehicle';
 }
 
 function closeVehicleModal() {
@@ -1807,8 +2076,34 @@ async function handleVehicleFormSubmit(e) {
   };
 
   // Only adding touches the fleet fee, so a missing plan must not block an edit.
-  if (!id && !fleetTierFor(fleetSize() + 1)) {
+  const cost = id ? null : costToAddVehicle();
+  if (!id && !cost) {
     return alert('❌ No fleet plan is configured, so this vehicle cannot be listed yet.');
+  }
+
+  // Adding a vehicle can move the agency onto a dearer band, so the payment is
+  // shown and confirmed before anything is saved — the same order the platform
+  // fee follows at registration. A vehicle that costs nothing extra skips it:
+  // there is nothing to confirm.
+  if (cost && cost.charge > 0) {
+    const paid = cost.tier.price - cost.charge;
+    const confirmed = await confirmPayment({
+      title: cost.upgrade ? 'Upgrade Fleet Plan' : 'Confirm Payment',
+      lead: cost.upgrade
+        ? `Adding ${name} takes your fleet to ${fleetSize() + 1} vehicles, which moves you onto the ${cost.tier.label} plan.`
+        : `Adding ${name} starts your fleet plan. One fee covers every vehicle in the band.`,
+      planName: `${cost.tier.label} fleet plan`,
+      planSub: `Covers ${fleetSize() + 1} vehicle${fleetSize() + 1 === 1 ? '' : 's'}`,
+      planPrice: money(cost.tier.price),
+      lines: [
+        { label: 'Plan price', value: `${money(cost.tier.price)} / ${period()}` },
+        ...(paid > 0 ? [{ label: 'Already paid this period', value: `− ${money(paid)}` }] : []),
+        { label: 'Billing period', value: period() }
+      ],
+      total: money(cost.charge),
+      actionLabel: `Pay ${money(cost.charge)} & Add`
+    });
+    if (!confirmed) return;
   }
 
   const saveBtn = document.getElementById('modal-save-btn');
@@ -1834,7 +2129,11 @@ async function handleVehicleFormSubmit(e) {
     if (id) {
       closeVehicleModal();
       await loadData();
-      return alert(`✅ ${name} updated.`);
+      return showNotice({
+        icon: '✏️',
+        title: `${name} updated`,
+        lead: 'The details are saved. Your fleet plan and renewal date are unchanged.'
+      });
     }
 
     // Adding: the API settles the fleet fee as part of creating the vehicle and
@@ -1845,24 +2144,34 @@ async function handleVehicleFormSubmit(e) {
     await loadData();
 
     if (!data.fleet) {
-      return alert(
-        `⚠️ ${name} was saved, but the fleet fee could not be charged, so your ` +
-        `vehicles are not visible to travellers yet.\n\n${data.listingWarning || ''}\n\n` +
-        `Pay it from the Subscription page.`
-      );
+      return showNotice({
+        icon: '⚠️',
+        title: `${name} saved, but not listed`,
+        lead: data.listingWarning ||
+          'The fleet fee could not be charged, so your vehicles are not visible to travellers yet. Pay it from the Subscription page.',
+        actionLabel: 'Got it'
+      });
     }
 
     // `charge` is what was actually billed — zero when the vehicle fitted
     // inside the band already paid for.
     const charged = Number(data.fleet.charge || 0);
-    return alert(
-      `✅ ${name} is live in the app!\n\n` +
-      `Fleet plan: ${data.fleet.tierLabel}\n` +
-      (charged > 0
-        ? `Charged: ${money(charged)}${data.fleet.upgraded ? ' (upgrade to this band)' : ''}\n`
-        : `Charged: nothing — already covered by your plan\n`) +
-      `Covered until: ${formatDate(data.fleet.expiresAt)}`
-    );
+    return showNotice({
+      icon: '🎉',
+      title: `${name} is live in the app!`,
+      lead: `Travellers can now see it. Your fleet plan covers every vehicle in the ${data.fleet.tierLabel} band.`,
+      lines: [
+        { label: 'Fleet plan', value: escapeHtml(data.fleet.tierLabel) },
+        { label: 'Vehicles covered', value: String(data.fleet.vehicleCount ?? fleetSize()) },
+        {
+          label: 'Paid now',
+          value: charged > 0
+            ? money(charged) + (data.fleet.upgraded ? ' (upgrade)' : '')
+            : 'Nothing — already covered'
+        },
+        { label: 'Covered until', value: formatDate(data.fleet.expiresAt) }
+      ]
+    });
   } catch (err) {
     alert('❌ ' + err.message);
   } finally {
