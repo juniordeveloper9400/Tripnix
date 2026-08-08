@@ -9,9 +9,30 @@ bool vehicleAvailableOn(Vehicle vehicle, DateTime date) {
   if (vehicle.availableDates.isNotEmpty) {
     return vehicle.availableDates.contains(formatted);
   }
-  
+
   // Fallback if no dates set
   return true;
+}
+
+/// The first date on or after [from] that the vehicle is free, or null when it
+/// has none — either because it posted no dates at all (so it is always free)
+/// or because every date it posted has passed.
+///
+/// The showcase shows a bus that is busy on the chosen day rather than hiding
+/// it, and needs this to say when it next comes free.
+DateTime? nextAvailableDate(Vehicle vehicle, DateTime from) {
+  if (vehicle.availableDates.isEmpty) return null;
+
+  final floor = DateTime(from.year, from.month, from.day);
+  final upcoming =
+      vehicle.availableDates
+          .map(DateTime.tryParse)
+          .whereType<DateTime>()
+          .where((d) => !d.isBefore(floor))
+          .toList()
+        ..sort();
+
+  return upcoming.isEmpty ? null : upcoming.first;
 }
 
 class Vehicle {

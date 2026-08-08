@@ -154,8 +154,12 @@ class _ExploreTabState extends State<_ExploreTab> {
     return names;
   }
 
+  /// Category, agency and search narrow the list. The chosen date deliberately
+  /// does not: a bus busy that day is shown dimmed with the date it next comes
+  /// free, because dropping it made an agency's newly added bus look as though
+  /// it had never been published at all.
   List<Vehicle> get _filteredVehicles {
-    return _allVehicles.where((v) {
+    final matching = _allVehicles.where((v) {
       final matchesCategory =
           _selectedCategory == 'All' ||
           v.type.toLowerCase() == _selectedCategory.toLowerCase();
@@ -167,10 +171,31 @@ class _ExploreTabState extends State<_ExploreTab> {
           v.name.toLowerCase().contains(q) ||
           v.operatorName.toLowerCase().contains(q) ||
           v.description.toLowerCase().contains(q);
-      final matchesDate = vehicleAvailableOn(v, _selectedDate);
-      return matchesCategory && matchesAgency && matchesSearch && matchesDate;
+      return matchesCategory && matchesAgency && matchesSearch;
     }).toList();
+
+    // Bookable on the chosen day leads; the rest follow in the order they come
+    // free, so the soonest alternative is the first one a traveller sees.
+    matching.sort((a, b) {
+      final aFree = vehicleAvailableOn(a, _selectedDate);
+      final bFree = vehicleAvailableOn(b, _selectedDate);
+      if (aFree != bFree) return aFree ? -1 : 1;
+      if (aFree) return 0;
+
+      final aNext = nextAvailableDate(a, _selectedDate);
+      final bNext = nextAvailableDate(b, _selectedDate);
+      if (aNext == null && bNext == null) return 0;
+      if (aNext == null) return 1;
+      if (bNext == null) return -1;
+      return aNext.compareTo(bNext);
+    });
+
+    return matching;
   }
+
+  /// How many of the listed buses can actually be booked on the chosen day.
+  int get _availableCount =>
+      _filteredVehicles.where((v) => vehicleAvailableOn(v, _selectedDate)).length;
 
   static const List<String> _months = [
     'Jan',
@@ -446,7 +471,11 @@ class _ExploreTabState extends State<_ExploreTab> {
                     const SizedBox(width: 8),
                     if (!_isLoading && _errorMessage == null)
                       Text(
-                        '${list.length} on $_selectedDateLabel',
+                        // Both figures, so "3 buses, 1 free today" is obvious
+                        // rather than looking like two of them vanished.
+                        list.length == _availableCount
+                            ? '${list.length} on $_selectedDateLabel'
+                            : '$_availableCount of ${list.length} on $_selectedDateLabel',
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
@@ -480,7 +509,21 @@ class _ExploreTabState extends State<_ExploreTab> {
                 padding: const EdgeInsets.only(bottom: 40),
                 sliver: SliverList(
                   delegate: SliverChildBuilderDelegate((context, index) {
-                    return VehicleCard(vehicle: list[index]);
+                    final vehicle = list[index];
+                    final free = vehicleAvailableOn(vehicle, _selectedDate);
+                    return VehicleCard(
+                      vehicle: vehicle,
+                      availableOnSelectedDate: free,
+                      nextAvailable: free
+                          ? null
+                          : nextAvailableDate(vehicle, _selectedDate),
+                      // Tapping a busy bus moves the whole screen to the day it
+                      // is free, rather than opening a bus that cannot be
+                      // booked on the date being shown.
+                      onJumpToNextAvailable: free
+                          ? null
+                          : (date) => setState(() => _selectedDate = date),
+                    );
                   }, childCount: list.length),
                 ),
               ),

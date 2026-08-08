@@ -12,14 +12,40 @@ class VehicleCard extends StatelessWidget {
     required this.vehicle,
     this.onDelete,
     this.showDelete = false,
+    this.availableOnSelectedDate = true,
+    this.nextAvailable,
+    this.onJumpToNextAvailable,
   });
 
   final Vehicle vehicle;
   final VoidCallback? onDelete;
   final bool showDelete;
 
+  /// Whether this bus can be booked on the date the showcase is showing. A bus
+  /// that cannot is dimmed rather than hidden, so an agency's newly added bus
+  /// is never invisible just because its dates start later.
+  final bool availableOnSelectedDate;
+
+  /// The next day it *is* free, when known.
+  final DateTime? nextAvailable;
+
+  /// Moves the showcase to [nextAvailable]. Null when the bus is already free
+  /// on the shown date, which is what makes the card open normally instead.
+  final void Function(DateTime date)? onJumpToNextAvailable;
+
+  static const _months = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ];
+
+  String get _nextLabel => nextAvailable == null
+      ? 'Not available'
+      : 'Next free ${nextAvailable!.day} ${_months[nextAvailable!.month - 1]}';
+
   @override
   Widget build(BuildContext context) {
+    final busy = !availableOnSelectedDate;
+
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
       decoration: BoxDecoration(
@@ -27,7 +53,7 @@ class VehicleCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
+            color: Colors.black.withValues(alpha: busy ? 0.04 : 0.08),
             spreadRadius: 2,
             blurRadius: 15,
             offset: const Offset(0, 5),
@@ -38,6 +64,12 @@ class VehicleCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         child: InkWell(
           onTap: () {
+            // Opening a bus that cannot be booked on the day being shown would
+            // only lead to a dead end, so the tap moves the date instead.
+            if (busy && nextAvailable != null && onJumpToNextAvailable != null) {
+              onJumpToNextAvailable!(nextAvailable!);
+              return;
+            }
             Navigator.push(
               context,
               MaterialPageRoute(
@@ -51,14 +83,29 @@ class VehicleCard extends StatelessWidget {
               // Vehicle Image Section with Hero and Badges
               Stack(
                 children: [
-                  Hero(
-                    tag: 'vehicle_image_${vehicle.id}',
-                    child: VehicleImage(
-                      url: vehicle.imageUrls.isNotEmpty
-                          ? vehicle.imageUrls.first
-                          : null,
-                      height: 180,
-                      emptyLabel: 'No photo yet',
+                  // Desaturated while the bus is busy, so the row reads at a
+                  // glance as "these are bookable, those are not".
+                  ColorFiltered(
+                    colorFilter: busy
+                        ? const ColorFilter.matrix(<double>[
+                            0.2126, 0.7152, 0.0722, 0, 0,
+                            0.2126, 0.7152, 0.0722, 0, 0,
+                            0.2126, 0.7152, 0.0722, 0, 0,
+                            0, 0, 0, 1, 0,
+                          ])
+                        : const ColorFilter.mode(
+                            Colors.transparent,
+                            BlendMode.dst,
+                          ),
+                    child: Hero(
+                      tag: 'vehicle_image_${vehicle.id}',
+                      child: VehicleImage(
+                        url: vehicle.imageUrls.isNotEmpty
+                            ? vehicle.imageUrls.first
+                            : null,
+                        height: 180,
+                        emptyLabel: 'No photo yet',
+                      ),
                     ),
                   ),
                   // Semi-transparent gradient overlay for badge readability
@@ -79,6 +126,42 @@ class VehicleCard extends StatelessWidget {
                     ),
                   ),
                   // Vehicle Type Badge (Bus / Car)
+                  // Says when the bus comes free, so a dimmed card explains
+                  // itself instead of just looking broken.
+                  if (busy)
+                    Positioned(
+                      top: 12,
+                      right: 12,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.black.withValues(alpha: 0.82),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.event_busy,
+                              size: 13,
+                              color: Colors.white,
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              _nextLabel,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   Positioned(
                     top: 12,
                     left: 12,
