@@ -38,9 +38,11 @@ class VehicleCard extends StatelessWidget {
     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
   ];
 
+  /// Phrased as what the bus *can* do rather than what it cannot — it is a
+  /// normal listing with different dates, not an inactive one.
   String get _nextLabel => nextAvailable == null
-      ? 'Not available'
-      : 'Next free ${nextAvailable!.day} ${_months[nextAvailable!.month - 1]}';
+      ? 'No upcoming dates'
+      : 'Free from ${nextAvailable!.day} ${_months[nextAvailable!.month - 1]}';
 
   @override
   Widget build(BuildContext context) {
@@ -53,7 +55,7 @@ class VehicleCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: busy ? 0.04 : 0.08),
+            color: Colors.black.withValues(alpha: 0.08),
             spreadRadius: 2,
             blurRadius: 15,
             offset: const Offset(0, 5),
@@ -83,29 +85,18 @@ class VehicleCard extends StatelessWidget {
               // Vehicle Image Section with Hero and Badges
               Stack(
                 children: [
-                  // Desaturated while the bus is busy, so the row reads at a
-                  // glance as "these are bookable, those are not".
-                  ColorFiltered(
-                    colorFilter: busy
-                        ? const ColorFilter.matrix(<double>[
-                            0.2126, 0.7152, 0.0722, 0, 0,
-                            0.2126, 0.7152, 0.0722, 0, 0,
-                            0.2126, 0.7152, 0.0722, 0, 0,
-                            0, 0, 0, 1, 0,
-                          ])
-                        : const ColorFilter.mode(
-                            Colors.transparent,
-                            BlendMode.dst,
-                          ),
-                    child: Hero(
-                      tag: 'vehicle_image_${vehicle.id}',
-                      child: VehicleImage(
-                        url: vehicle.imageUrls.isNotEmpty
-                            ? vehicle.imageUrls.first
-                            : null,
-                        height: 180,
-                        emptyLabel: 'No photo yet',
-                      ),
+                  // Every bus is shown in full colour, whether or not it is free
+                  // on the day being browsed. Greying the busy ones made a
+                  // perfectly good bus look broken or delisted; the date badge
+                  // below carries that information instead.
+                  Hero(
+                    tag: 'vehicle_image_${vehicle.id}',
+                    child: VehicleImage(
+                      url: vehicle.imageUrls.isNotEmpty
+                          ? vehicle.imageUrls.first
+                          : null,
+                      height: 180,
+                      emptyLabel: 'No photo yet',
                     ),
                   ),
                   // Semi-transparent gradient overlay for badge readability
@@ -126,8 +117,9 @@ class VehicleCard extends StatelessWidget {
                     ),
                   ),
                   // Vehicle Type Badge (Bus / Car)
-                  // Says when the bus comes free, so a dimmed card explains
-                  // itself instead of just looking broken.
+                  // When the bus is free, in the same style as the card's other
+                  // badges so it reads as one more detail about a normal
+                  // listing rather than a warning on a disabled one.
                   if (busy)
                     Positioned(
                       top: 12,
@@ -138,14 +130,14 @@ class VehicleCard extends StatelessWidget {
                           vertical: 6,
                         ),
                         decoration: BoxDecoration(
-                          color: AppColors.black.withValues(alpha: 0.82),
+                          color: AppColors.black.withValues(alpha: 0.7),
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             const Icon(
-                              Icons.event_busy,
+                              Icons.event_available,
                               size: 13,
                               color: Colors.white,
                             ),
