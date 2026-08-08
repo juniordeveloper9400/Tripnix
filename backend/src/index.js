@@ -10,6 +10,8 @@ import bookingsRouter from "./routes/bookings.js";
 import authRouter from "./routes/auth.js";
 import uploadsRouter from "./routes/uploads.js";
 import subscriptionsRouter from "./routes/subscriptions.js";
+import trackingRouter from "./routes/tracking.js";
+import accountsRouter from "./routes/accounts.js";
 import { databaseConfigured, configReport } from "./lib/firebase.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -52,6 +54,8 @@ app.use("/api/trips", tripsRouter);
 app.use("/api/vehicles", vehiclesRouter);
 app.use("/api/bookings", bookingsRouter);
 app.use("/api/subscriptions", subscriptionsRouter);
+app.use("/api/tracking", trackingRouter);
+app.use("/api/accounts", accountsRouter);
 app.use("/api/uploads", uploadsRouter);
 
 // 404 fallback

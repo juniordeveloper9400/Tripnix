@@ -10,6 +10,8 @@ let state = {
   admins: [],
   plans: null,          // plan catalogue from the backend
   subscription: null,   // this agency's platform membership + fleet plan
+  accounts: null,       // the money ledger for the selected month
+  tracking: null,       // last known position per bus
   agencySubs: [],       // super admin: every agency's subscription state
   trips: [],            // trips this agency has posted
   activeTab: 'dashboard',
@@ -246,7 +248,9 @@ function switchTab(tabId) {
     bookings:  ['Customer Bookings',      'Review and manage booking requests'],
     trips:     ['Trips',                  'Post trips that appear in the traveller app story bar'],
     schedule:  ['Bus Diary',              'The running schedule for each bus in your fleet'],
-    subscription: ['Subscription & Plans', 'Platform membership and per-vehicle listing fees'],
+    accounts:  ['Accounts',               'What the diary earned, against what you have paid Tripnix'],
+    gps:       ['GPS Tracking',           'Where every bus last reported from'],
+    subscription: ['Subscription & Plans', 'Platform membership and the fleet plan'],
     admins:    ['Manage Travel Owners',   'Create and manage Travel Owner login credentials']
   };
 
@@ -259,6 +263,162 @@ function switchTab(tabId) {
   if (tabId === 'subscription') loadSubscription();
   if (tabId === 'trips') loadTrips();
   if (tabId === 'schedule') loadDiary();
+  if (tabId === 'accounts') loadAccounts();
+  if (tabId === 'gps') loadTracking();
+}
+
+// ─── Accounts ──────────────────────────────────────────────
+
+/// The same ledger the owner sees. Office staff need it to answer "has this
+/// job been paid for" without being handed the owner portal.
+async function loadAccounts(month) {
+  const operatorName = state.currentUser?.operatorName;
+  if (!operatorName) return;
+
+  try {
+    const q = month ? `&month=${encodeURIComponent(month)}` : '';
+    const res = await fetch(`${API_BASE}/accounts?operatorName=${encodeURIComponent(operatorName)}${q}`);
+    if (!res.ok) throw new Error('Could not load accounts');
+    state.accounts = await res.json();
+    renderAccounts();
+  } catch (err) {
+    document.getElementById('acc-breakdown').innerHTML =
+      `<p class="diary-empty">❌ ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+function renderAccounts() {
+  const a = state.accounts;
+  if (!a) return;
+
+  const select = document.getElementById('acc-month');
+  if (select && document.activeElement !== select) {
+    select.innerHTML = a.availableMonths.length
+      ? a.availableMonths.map(m =>
+          `<option value="${m.value}" ${m.value === a.month ? 'selected' : ''}>${escapeHtml(m.label)}</option>`).join('')
+      : `<option>${escapeHtml(a.monthLabel)}</option>`;
+  }
+
+  document.getElementById('acc-stats').innerHTML = `
+    <div class="stat-card"><span class="stat-icon">📥</span><div><strong>${money(a.income.total)}</strong><span>Money in</span></div></div>
+    <div class="stat-card"><span class="stat-icon">📤</span><div><strong>${money(a.expense.total)}</strong><span>Money out</span></div></div>
+    <div class="stat-card"><span class="stat-icon">${a.profit < 0 ? '📉' : '📈'}</span><div><strong>${money(a.profit)}</strong><span>Profit · ${a.margin}%</span></div></div>
+    <div class="stat-card"><span class="stat-icon">📕</span><div><strong>${a.income.orders}</strong><span>Orders</span></div></div>`;
+
+  document.getElementById('acc-breakdown').innerHTML = `
+    <div class="diary-row"><div class="diary-row-main">Diary fares (${a.income.orders})</div><strong>${money(a.income.trips)}</strong></div>
+    <div class="diary-row"><div class="diary-row-main">Other income</div><strong>${money(a.income.other)}</strong></div>
+    <div class="diary-row"><div class="diary-row-main">App bookings (${a.income.appBookings})</div><span style="color:var(--text-muted);font-style:italic;">no fare recorded</span></div>
+    <div class="diary-row"><div class="diary-row-main">Expenses</div><strong>− ${money(a.expense.total)}</strong></div>
+    <div class="diary-row" style="border-bottom:none;padding-top:14px;">
+      <div class="diary-row-main"><strong>${escapeHtml(a.monthLabel)} profit</strong></div>
+      <strong style="font-size:20px;color:${a.profit < 0 ? 'var(--accent-red)' : 'var(--accent-green)'};">${money(a.profit)}</strong>
+    </div>
+    ${a.expense.byCategory.length ? `
+      <p class="panel-header-note" style="margin-top:14px;">Spent on:
+        ${a.expense.byCategory.map(c => `${escapeHtml(c.category)} ${money(c.amount)}`).join(' · ')}
+      </p>` : ''}
+    <p class="panel-header-note" style="margin-top:10px;line-height:1.6;">
+      Diary fares come from the Bus Diary automatically. App bookings carry no fare — travellers
+      book without a rate, so nothing is invented for them. Capital and expenses are managed by
+      the owner in the Owner Portal.
+    </p>`;
+
+  document.getElementById('acc-vehicles').innerHTML = a.perVehicle.length
+    ? a.perVehicle.map(v => `
+        <div class="diary-row">
+          <div class="diary-row-main">
+            <strong>${escapeHtml(v.vehicleName)}</strong>
+            <div class="diary-row-who">${v.orders} order${v.orders === 1 ? '' : 's'} · in ${money(v.income)} · out ${money(v.expense)}</div>
+          </div>
+          <strong style="color:${v.profit < 0 ? 'var(--accent-red)' : 'inherit'};">${money(v.profit)}</strong>
+        </div>`).join('')
+    : '<p class="diary-empty">No buses yet.</p>';
+
+  // Diary fares and hand-written entries share one list, newest last, so the
+  // month reads in the order it happened.
+  const rows = [
+    ...a.entries.orders.map(e => ({ ...e, kindLabel: 'Diary fare', sign: '+' })),
+    ...a.entries.manual.map(e => ({
+      ...e,
+      kindLabel: e.source === 'income' ? 'Income' : 'Expense',
+      sign: e.source === 'expense' ? '−' : '+'
+    }))
+  ].sort((x, y) => String(x.date).localeCompare(String(y.date)));
+
+  document.getElementById('acc-entries').innerHTML = rows.length
+    ? rows.map(e => `
+        <div class="diary-row">
+          <div class="diary-row-main">
+            <strong>${escapeHtml(e.label)}</strong>
+            <div class="diary-row-who">
+              ${escapeHtml(e.kindLabel)} · ${escapeHtml(e.vehicleName || 'Whole agency')} ·
+              ${formatDate(e.date)}${e.detail ? ' · ' + escapeHtml(e.detail) : ''}
+            </div>
+          </div>
+          <strong style="color:${e.sign === '−' ? 'var(--accent-red)' : 'inherit'};">${e.sign}${money(e.amount)}</strong>
+        </div>`).join('')
+    : '<p class="diary-empty">Nothing recorded for this month yet.</p>';
+}
+
+// ─── GPS tracking ──────────────────────────────────────────
+
+async function loadTracking() {
+  const operatorName = state.currentUser?.operatorName;
+  if (!operatorName) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/tracking?operatorName=${encodeURIComponent(operatorName)}`);
+    if (!res.ok) throw new Error('Could not load tracking');
+    state.tracking = await res.json();
+    renderTracking();
+  } catch (err) {
+    document.getElementById('gps-list').innerHTML =
+      `<p class="diary-empty">❌ ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+function renderTracking() {
+  const t = state.tracking;
+  if (!t) return;
+
+  document.getElementById('gps-note').textContent =
+    `${t.reporting} of ${t.total} reporting · live for ${t.staleAfterMinutes} minutes after the last fix`;
+
+  document.getElementById('gps-endpoint').textContent =
+    `POST ${API_BASE}/tracking/vehicles/<vehicleId>\n` +
+    `Content-Type: application/json\n\n` +
+    `{ "lat": 9.9312, "lng": 76.2673, "speedKph": 42, "label": "Kochi" }`;
+
+  document.getElementById('gps-list').innerHTML = t.vehicles.length
+    ? t.vehicles.map(v => {
+        const l = v.location;
+        const badge = !l
+          ? '<span class="badge-status pending">NO SIGNAL</span>'
+          : l.live
+            ? '<span class="badge-status confirmed">LIVE</span>'
+            : `<span class="badge-status cancelled">${l.ageMinutes} MIN AGO</span>`;
+
+        const where = !l
+          ? 'This bus has never reported a position'
+          : `${l.label ? escapeHtml(l.label) + ' · ' : ''}${l.lat.toFixed(5)}, ${l.lng.toFixed(5)}` +
+            `${l.speedKph ? ' · ' + Math.round(l.speedKph) + ' km/h' : ''}`;
+
+        const map = l
+          ? ` · <a href="https://www.google.com/maps?q=${l.lat},${l.lng}" target="_blank" rel="noopener">Open map ↗</a>`
+          : '';
+
+        return `
+          <div class="diary-row">
+            <div class="diary-row-main">
+              <strong>${escapeHtml(v.vehicleName)}</strong>
+              <code class="vehicle-number">${escapeHtml(v.vehicleNumber || '—')}</code>
+              <div class="diary-row-who">${where}${map}</div>
+            </div>
+            <div class="diary-row-status">${badge}</div>
+          </div>`;
+      }).join('')
+    : '<p class="diary-empty">No buses in the fleet yet.</p>';
 }
 
 // ─── Event Listeners ───────────────────────────────────────
@@ -288,6 +448,7 @@ function setupEventListeners() {
   document.getElementById('diary-modal-close')?.addEventListener('click', closeDiaryModal);
   document.getElementById('diary-modal-cancel')?.addEventListener('click', closeDiaryModal);
   document.getElementById('diary-form')?.addEventListener('submit', handleDiarySubmit);
+  document.getElementById('acc-month')?.addEventListener('change', e => loadAccounts(e.target.value));
   // Keeping "to" at or after "from" stops the API rejecting a backwards range
   // after the agency has typed the whole entry.
   document.getElementById('diary-from')?.addEventListener('change', e => {
@@ -1110,7 +1271,10 @@ async function loadSubscription() {
 /// Formats an amount using the catalogue currency, e.g. ₹12,000.
 function money(amount) {
   const symbol = state.plans?.currencySymbol || '₹';
-  return symbol + Number(amount || 0).toLocaleString('en-IN');
+  // A loss reads "-₹24,000", not "₹-24,000" — the sign belongs in front of the
+  // whole amount, which is where a reader scanning a column expects it.
+  const n = Number(amount || 0);
+  return (n < 0 ? '-' : '') + symbol + Math.abs(n).toLocaleString('en-IN');
 }
 
 function formatDate(iso) {

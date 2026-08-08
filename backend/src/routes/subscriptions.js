@@ -216,7 +216,7 @@ export function platformPlan(planId) {
 }
 
 /// The agency's platform membership record, paid or lapsed, or undefined.
-function platformSubFor(operatorName) {
+export function platformSubFor(operatorName) {
   const key = normalise(operatorName);
   return platformSubs.find((s) => normalise(s.operatorName) === key);
 }

@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tripnix · Owner Portal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+
+  <!-- Sign in -->
+  <div id="login-screen" class="login-screen">
+    <div class="login-card">
+      <div class="login-brand">
+        <span class="login-mark">T</span>
+        <div>
+          <h1>Tripnix</h1>
+          <span>OWNER PORTAL</span>
+        </div>
+      </div>
+      <p class="login-lead">
+        The owner's view of your agency — money, trackers and live fleet status.
+        Office staff sign in to the admin portal instead.
+      </p>
+      <form id="login-form">
+        <div class="form-group">
+          <label for="login-username">Username</label>
+          <input type="text" id="login-username" autocomplete="username" required />
+        </div>
+        <div class="form-group">
+          <label for="login-password">Password</label>
+          <input type="password" id="login-password" autocomplete="current-password" required />
+        </div>
+        <p class="login-error hidden" id="login-error"></p>
+        <button type="submit" class="btn btn-primary btn-full" id="login-btn">Sign In</button>
+      </form>
+      <p class="login-foot">
+        Staff portal: <a id="admin-link" href="/admin/">open the admin portal</a>
+      </p>
+    </div>
+  </div>
+
+  <!-- Portal -->
+  <div class="app-layout hidden" id="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">T</span>
+        <div class="brand-text">
+          <h2>Tripnix</h2>
+          <span>Owner Portal</span>
+        </div>
+      </div>
+
+      <div class="agency-block" id="agency-block"></div>
+
+      <nav class="nav-menu">
+        <button class="nav-item active" data-tab="dashboard"><span>📊</span> Dashboard</button>
+        <button class="nav-item" data-tab="accounts"><span>💰</span> Accounts</button>
+        <button class="nav-item" data-tab="gps"><span>📍</span> GPS Tracking</button>
+        <button class="nav-item" data-tab="staff"><span>👥</span> Office Staff</button>
+      </nav>
+
+      <div class="sidebar-foot">
+        <a class="nav-item" id="open-admin" href="/admin/" target="_blank" rel="noopener">
+          <span>🗂️</span> Admin portal
+        </a>
+        <button class="nav-item" id="logout-btn"><span>🚪</span> Sign out</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="top-header">
+        <div>
+          <h1 id="page-title">Dashboard</h1>
+          <p id="page-sub">Everything happening across your fleet</p>
+        </div>
+        <button class="btn btn-secondary" id="refresh-btn">🔄 Refresh</button>
+      </header>
+
+      <div class="content">
+        <!-- Dashboard -->
+        <section id="tab-dashboard" class="tab-page active">
+          <div class="stat-row" id="dash-stats"></div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Fleet status right now</h3>
+              <span class="panel-note">Where every bus stands today — posted trips, diary orders and free days</span>
+            </div>
+            <div class="panel-body">
+              <div id="fleet-status"></div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Trip statuses in the app</h3>
+              <span class="panel-note">What travellers can see. Post these from the admin portal.</span>
+            </div>
+            <div class="panel-body">
+              <div id="dash-statuses"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Accounts -->
+        <section id="tab-accounts" class="tab-page">
+          <div class="toolbar">
+            <select id="accounts-month" class="month-select"></select>
+            <div class="toolbar-right">
+              <button class="btn btn-secondary btn-sm" id="download-month">⬇️ Month review (CSV)</button>
+              <button class="btn btn-secondary btn-sm" id="download-all">⬇️ All months (CSV)</button>
+              <button class="btn btn-primary btn-sm" id="add-entry-btn">➕ Add entry</button>
+            </div>
+          </div>
+
+          <div class="stat-row" id="accounts-stats"></div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Capital</h3>
+              <span class="panel-note">What the buses cost to buy, and how much they have earned back</span>
+            </div>
+            <div class="panel-body"><div id="capital-block"></div></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3 id="chart1-title">Money in and out by month</h3>
+              <span class="panel-note">Income against expenses, month by month</span>
+            </div>
+            <div class="panel-body"><div id="chart-inout"></div></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Profit trend</h3>
+              <span class="panel-note">What was left after expenses, month by month</span>
+            </div>
+            <div class="panel-body"><div id="chart-trend"></div></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3 id="chart3-title">Profit by bus</h3>
+              <span class="panel-note">Which bus earned, and which lost, this month</span>
+            </div>
+            <div class="panel-body"><div id="chart-vehicles"></div></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Is each bus paying for itself?</h3>
+              <span class="panel-note">How much of the purchase price each has earned back so far</span>
+            </div>
+            <div class="panel-body"><div id="chart-recovery"></div></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Where the money went</h3>
+              <span class="panel-note" id="expense-note"></span>
+            </div>
+            <div class="panel-body"><div id="expense-breakdown"></div></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Every entry this month</h3>
+              <span class="panel-note">Diary fares are automatic; the rest you added by hand</span>
+            </div>
+            <div class="panel-body"><div id="accounts-entries"></div></div>
+          </div>
+        </section>
+
+        <!-- GPS -->
+        <section id="tab-gps" class="tab-page">
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Live positions</h3>
+              <span class="panel-note" id="gps-note"></span>
+            </div>
+            <div class="panel-body">
+              <div id="gps-list"></div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head"><h3>Connecting a tracker</h3></div>
+            <div class="panel-body">
+              <p class="hint">
+                Any tracker, driver phone or third-party device can report a position
+                by posting to this endpoint. Nothing else is needed to make a bus
+                appear above.
+              </p>
+              <pre class="code" id="gps-endpoint"></pre>
+              <p class="hint warn">
+                ⚠️ This endpoint is open to anyone who knows the vehicle id. Add a
+                per-device key before real buses depend on it.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Staff -->
+        <section id="tab-staff" class="tab-page">
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Office staff logins</h3>
+              <span class="panel-note">They get the admin portal — fleet, diary, trips and bookings. Not this one.</span>
+            </div>
+            <div class="panel-body">
+              <form id="staff-form" class="staff-form">
+                <div class="form-row">
+                  <div class="form-group"><label for="staff-username">Username *</label><input id="staff-username" required /></div>
+                  <div class="form-group"><label for="staff-password">Password *</label><input id="staff-password" type="password" minlength="6" required /></div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group"><label for="staff-name">Person's name</label><input id="staff-name" /></div>
+                  <div class="form-group"><label for="staff-phone">Phone</label><input id="staff-phone" /></div>
+                </div>
+                <button class="btn btn-primary" type="submit" id="staff-save">➕ Create staff login</button>
+              </form>
+              <div id="staff-list"></div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <!-- Add a capital / income / expense entry -->
+  <div id="entry-modal" class="modal-backdrop hidden">
+    <div class="modal-card modal-wide">
+      <div class="modal-head">
+        <h3>Add to the books</h3>
+        <button class="close-btn" id="entry-close">&times;</button>
+      </div>
+      <form id="entry-form" class="modal-form">
+        <div class="kind-picker" id="entry-kind">
+          <label class="kind"><input type="radio" name="kind" value="capital" /><span>🏦 Capital</span><small>What a bus cost to buy</small></label>
+          <label class="kind"><input type="radio" name="kind" value="income" checked /><span>📥 Income</span><small>Money received</small></label>
+          <label class="kind"><input type="radio" name="kind" value="expense" /><span>📤 Expense</span><small>Money spent</small></label>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="entry-vehicle">Bus <span id="entry-vehicle-req"></span></label>
+            <select id="entry-vehicle" class="month-select"></select>
+          </div>
+          <div class="form-group">
+            <label for="entry-category">Category</label>
+            <select id="entry-category" class="month-select"></select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="entry-amount">Amount (₹) *</label>
+            <input type="number" id="entry-amount" min="1" step="1" required />
+          </div>
+          <div class="form-group">
+            <label for="entry-date">Date *</label>
+            <input type="date" id="entry-date" required />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="entry-note">Note</label>
+          <input type="text" id="entry-note" placeholder="Anything worth remembering" />
+        </div>
+
+        <p class="hint" id="entry-hint"></p>
+
+        <div class="modal-foot-row">
+          <button type="button" class="btn btn-secondary" id="entry-cancel">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="entry-save">Save entry</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- In-app notice -->
+  <div id="notice" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="notice-body">
+        <div class="notice-icon" id="notice-icon">✅</div>
+        <h3 id="notice-title"></h3>
+        <p id="notice-lead"></p>
+      </div>
+      <div class="modal-foot"><button class="btn btn-primary btn-full" id="notice-ok">Done</button></div>
+    </div>
+  </div>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

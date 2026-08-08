@@ -63,6 +63,15 @@ function sendError(res, err, context) {
   return res.status(500).json({ error: err?.message || `${context} failed` });
 }
 
+/// Who a signed-in account is, in terms the portals gate on.
+///
+/// Accounts created before the owner/staff split carry role "admin". They are
+/// the person who registered the agency, so they are owners — reading them as
+/// staff would lock every existing agency out of its own owner portal.
+export function isOwnerRole(role) {
+  return role === "owner" || role === "admin" || role === "superadmin";
+}
+
 function publicProfileData(data) {
   return {
     id: data.username,
@@ -72,6 +81,8 @@ function publicProfileData(data) {
     phone: data.phone || "",
     email: data.email || "",
     role: data.role,
+    // Sent so a portal never has to know which legacy role names mean what.
+    isOwner: isOwnerRole(data.role),
     registeredAt: data.registeredAt || null
   };
 }
@@ -89,7 +100,11 @@ async function createAgency({
   ownerName,
   phone,
   email,
-  role
+  role,
+  // Set when the new login joins an agency that already exists, rather than
+  // founding one. Office staff share their owner's agency name by design, so
+  // the "already registered" check below must not fire for them.
+  joinExistingAgency = false
 }) {
   const id = docIdFor(username);
   const operatorLower = String(operatorName).trim().toLowerCase();
@@ -103,15 +118,17 @@ async function createAgency({
 
   // Needs ".indexOn": "operatorNameLower" on /agencies in the database rules,
   // otherwise the server sorts the whole node in memory on every signup.
-  const nameTaken = await agencies()
-    .orderByChild("operatorNameLower")
-    .equalTo(operatorLower)
-    .limitToFirst(1)
-    .get();
-  if (nameTaken.exists()) {
-    const err = new Error("That travel agency is already registered");
-    err.status = 409;
-    throw err;
+  if (!joinExistingAgency) {
+    const nameTaken = await agencies()
+      .orderByChild("operatorNameLower")
+      .equalTo(operatorLower)
+      .limitToFirst(1)
+      .get();
+    if (nameTaken.exists()) {
+      const err = new Error("That travel agency is already registered");
+      err.status = 409;
+      throw err;
+    }
   }
 
   let uid;
@@ -263,7 +280,9 @@ router.post("/register", async (req, res) => {
       ownerName,
       phone,
       email,
-      role: "admin"
+      // Whoever registers the agency is its owner. Office staff get their own
+      // logins, created by the owner from the owner portal.
+      role: "owner"
     });
 
     res.status(201).json({
@@ -383,6 +402,137 @@ router.delete("/admins/:id", async (req, res) => {
     return res.status(204).end();
   } catch (err) {
     return sendError(res, err, "Delete admin failed");
+  }
+});
+
+// ─── Office staff ──────────────────────────────────────────
+//
+// An agency's owner creates logins for the people who run the office. They
+// share the agency's operatorName, so they see the same fleet, diary and
+// bookings — but not the owner portal, where the money and the trackers are.
+
+/// Confirms the caller is the owner of `operatorName`.
+///
+/// The portals have no session token, so the owner's username is sent with the
+/// request and checked against the stored record here. That is the same trust
+/// model the rest of the API already uses; it is not a substitute for real
+/// authentication, which the whole API still needs.
+async function requireOwner(res, operatorName, ownerUsername) {
+  if (!operatorName || !ownerUsername) {
+    res.status(400).json({ error: "operatorName and ownerUsername are required" });
+    return null;
+  }
+
+  const doc = await agencies().child(docIdFor(ownerUsername)).get();
+  if (!doc.exists()) {
+    res.status(404).json({ error: "No such account" });
+    return null;
+  }
+
+  const record = doc.val();
+  if (!isOwnerRole(record.role)) {
+    res.status(403).json({ error: "Only the agency owner can manage staff logins" });
+    return null;
+  }
+  if (
+    record.role !== "superadmin" &&
+    String(record.operatorName).trim().toLowerCase() !==
+      String(operatorName).trim().toLowerCase()
+  ) {
+    res.status(403).json({ error: "That agency belongs to someone else" });
+    return null;
+  }
+
+  return record;
+}
+
+// GET /api/auth/staff?operatorName=...&ownerUsername=...
+router.get("/staff", async (req, res) => {
+  if (firebaseUnavailable(res)) return;
+  const { operatorName, ownerUsername } = req.query;
+
+  try {
+    if (!(await requireOwner(res, operatorName, ownerUsername))) return;
+
+    const snap = await agencies()
+      .orderByChild("operatorNameLower")
+      .equalTo(String(operatorName).trim().toLowerCase())
+      .get();
+
+    const staff = snapshotToArray(snap)
+      .filter((a) => a.role === "staff")
+      .map(publicProfileData)
+      .sort((a, b) => String(a.username).localeCompare(String(b.username)));
+
+    res.json(staff);
+  } catch (err) {
+    return sendError(res, err, "Could not load staff");
+  }
+});
+
+// POST /api/auth/staff - the owner creates an office-staff login
+router.post("/staff", async (req, res) => {
+  if (firebaseUnavailable(res)) return;
+  const { operatorName, ownerUsername, username, password, ownerName, phone, email } =
+    req.body;
+
+  if (!username || !password) {
+    return res.status(400).json({ error: "Username and password are required" });
+  }
+
+  try {
+    const owner = await requireOwner(res, operatorName, ownerUsername);
+    if (!owner) return;
+
+    const record = await createAgency({
+      username,
+      password,
+      // Staff belong to the owner's agency, never to one they typed
+      // themselves — otherwise a staff login could be attached to any agency.
+      operatorName: owner.role === "superadmin" ? operatorName : owner.operatorName,
+      ownerName,
+      phone,
+      email,
+      role: "staff",
+      joinExistingAgency: true
+    });
+
+    res.status(201).json(publicProfileData(record));
+  } catch (err) {
+    return sendError(res, err, "Could not create the staff login");
+  }
+});
+
+// DELETE /api/auth/staff/:id?operatorName=...&ownerUsername=...
+router.delete("/staff/:id", async (req, res) => {
+  if (firebaseUnavailable(res)) return;
+  const { operatorName, ownerUsername } = req.query;
+  const id = docIdFor(req.params.id);
+
+  try {
+    if (!(await requireOwner(res, operatorName, ownerUsername))) return;
+
+    const doc = await agencies().child(id).get();
+    if (!doc.exists()) return res.status(404).json({ error: "No such account" });
+
+    const target = doc.val();
+    // Only staff, and only this agency's — never another owner, and never the
+    // caller's own login.
+    if (target.role !== "staff") {
+      return res.status(403).json({ error: "Only staff logins can be removed here" });
+    }
+    if (
+      String(target.operatorName).trim().toLowerCase() !==
+      String(operatorName).trim().toLowerCase()
+    ) {
+      return res.status(403).json({ error: "That login belongs to another agency" });
+    }
+
+    await deleteAuthUser(target.uid);
+    await agencies().child(id).remove();
+    res.status(204).end();
+  } catch (err) {
+    return sendError(res, err, "Could not remove the staff login");
   }
 });
 

@@ -123,6 +123,15 @@ export async function refreshTripsFromDb() {
   return trips;
 }
 
+/// Every stored trip, in whatever state this process last loaded them.
+///
+/// Callers must have awaited refreshTripsFromDb() first — the accounts ledger
+/// reads this, and a total built from a half-loaded process would be wrong in
+/// the one place being wrong matters most.
+export function allTrips() {
+  return trips;
+}
+
 /// Every trip booked against one vehicle, newest departure first.
 export function tripsForVehicle(vehicleId) {
   return trips

@@ -2,7 +2,8 @@
 # Assembles the deployed site:
 #
 #   /          Flutter web app  (frontend/)
-#   /admin/    admin portal     (admin/)
+#   /admin/    office-staff portal (admin/)
+#   /owner/    agency-owner portal (owner/)
 #   /public/   shared images    (backend/public/)
 #   /api/*     Express handler  (api/index.js, deployed as a function)
 #
@@ -28,11 +29,15 @@ echo "==> Building Flutter web app"
 echo "==> Building admin portal"
 (cd admin && npm ci && npm run build)
 
+echo "==> Building owner portal"
+(cd owner && npm ci && npm run build)
+
 echo "==> Assembling ${OUT_DIR}"
 rm -rf "${OUT_DIR}"
-mkdir -p "${OUT_DIR}/admin" "${OUT_DIR}/public"
+mkdir -p "${OUT_DIR}/admin" "${OUT_DIR}/owner" "${OUT_DIR}/public"
 cp -R frontend/build/web/. "${OUT_DIR}/"
 cp -R admin/dist/. "${OUT_DIR}/admin/"
+cp -R owner/dist/. "${OUT_DIR}/owner/"
 cp -R backend/public/. "${OUT_DIR}/public/"
 
 echo "==> Done"
