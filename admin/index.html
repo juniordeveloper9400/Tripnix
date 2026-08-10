@@ -9,8 +9,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/dark.css">
-  <script type="module" crossorigin src="/admin/assets/index-gyBAzXkf.js"></script>
-  <link rel="stylesheet" crossorigin href="/admin/assets/index-CNz6LdZt.css">
+  <script type="module" crossorigin src="/admin/assets/index-IogQ9W34.js"></script>
+  <link rel="stylesheet" crossorigin href="/admin/assets/index-DgsWnJBJ.css">
 </head>
 <body>
 
@@ -274,6 +274,7 @@
               <button class="chip" data-filter="Traveller">Travellers</button>
               <button class="chip" data-filter="Car">Cars</button>
             </div>
+            <div class="filter-chips seat-filter-group" id="seat-filter-chips"></div>
             <input type="text" id="fleet-search" placeholder="Search by vehicle name..." class="search-input" />
           </div>
           <div class="vehicle-cards-grid" id="vehicles-grid"></div>
@@ -680,6 +681,7 @@
         <div class="form-group">
           <label for="vehicle-capacity">Capacity (Seats)</label>
           <input type="number" id="vehicle-capacity" min="1" placeholder="36" required />
+          <div class="seat-options-container" id="vehicle-seat-options"></div>
         </div>
 
         <!-- Vehicle subscription — priced by seat count, charged on save -->
