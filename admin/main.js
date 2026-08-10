@@ -571,11 +571,13 @@ function setupEventListeners() {
     if (to && (!to.value || to.value < e.target.value)) to.value = e.target.value;
   });
 
-  document.querySelectorAll('.filter-chips .chip').forEach(chip => {
+  document.querySelectorAll('.filter-chips .chip[data-filter]').forEach(chip => {
     chip.addEventListener('click', () => {
-      document.querySelectorAll('.filter-chips .chip').forEach(c => c.classList.remove('active'));
+      document.querySelectorAll('.filter-chips .chip[data-filter]').forEach(c => c.classList.remove('active'));
       chip.classList.add('active');
       state.fleetFilter = chip.getAttribute('data-filter');
+      state.seatFilter = 'All';
+      renderFleetSeatFilterChips();
       renderFleetGrid();
     });
   });
@@ -633,6 +635,86 @@ function setupCustomTypeDropdown() {
     Car: '🚗'
   };
 
+const CATEGORY_SEAT_CONFIGS = {
+  Bus: [
+    { label: '12 Seats', value: 12 },
+    { label: '22 Seats', value: 22 },
+    { label: '36 Seats', value: 36 },
+    { label: '49 Seats', value: 49 },
+    { label: 'Above 49 Seats', value: 50, isAbove: true }
+  ],
+  Traveller: [
+    { label: '12 Seats', value: 12 },
+    { label: '14 Seats', value: 14 },
+    { label: '16 Seats', value: 16 },
+    { label: '18 Seats', value: 18 }
+  ],
+  Car: [
+    { label: '4 Seats', value: 4 },
+    { label: '7 Seats', value: 7 },
+    { label: '8 Seats', value: 8 }
+  ]
+};
+
+function renderVehicleSeatPills(category) {
+  const container = document.getElementById('vehicle-seat-options');
+  const capacityInput = document.getElementById('vehicle-capacity');
+  if (!container || !capacityInput) return;
+
+  const currentCategory = category || document.getElementById('vehicle-type')?.value || 'Bus';
+  const options = CATEGORY_SEAT_CONFIGS[currentCategory] || CATEGORY_SEAT_CONFIGS.Bus;
+  const currentVal = Number(capacityInput.value) || 0;
+
+  container.innerHTML = options.map(opt => {
+    const isSelected = opt.isAbove ? currentVal > 49 : currentVal === opt.value;
+    return `
+      <button type="button" class="seat-option-pill${isSelected ? ' active' : ''}"
+              onclick="selectVehicleSeatPill(${opt.value}, ${opt.isAbove ? 'true' : 'false'})">
+        ${escapeHtml(opt.label)}
+      </button>`;
+  }).join('');
+}
+
+window.selectVehicleSeatPill = function(val, isAbove) {
+  const capacityInput = document.getElementById('vehicle-capacity');
+  if (!capacityInput) return;
+  capacityInput.value = val;
+  renderVehicleSeatPills();
+  renderVehicleSubscriptionPanel();
+};
+
+function renderFleetSeatFilterChips() {
+  const container = document.getElementById('seat-filter-chips');
+  if (!container) return;
+
+  const activeCat = state.fleetFilter;
+  const options = CATEGORY_SEAT_CONFIGS[activeCat];
+
+  if (!options || !options.length) {
+    container.innerHTML = '';
+    state.seatFilter = 'All';
+    return;
+  }
+
+  container.innerHTML = `
+    <button type="button" class="chip${state.seatFilter === 'All' ? ' active' : ''}" onclick="setFleetSeatFilter('All')">All Seats</button>
+    ${options.map(opt => {
+      const key = opt.isAbove ? 'above49' : String(opt.value);
+      const isSelected = state.seatFilter === key;
+      return `
+        <button type="button" class="chip${isSelected ? ' active' : ''}" onclick="setFleetSeatFilter('${key}')">
+          ${escapeHtml(opt.label)}
+        </button>`;
+    }).join('')}
+  `;
+}
+
+window.setFleetSeatFilter = function(seatVal) {
+  state.seatFilter = seatVal;
+  renderFleetSeatFilterChips();
+  renderFleetGrid();
+};
+
   window.syncCustomTypeDropdown = function(val) {
     const value = val || select.value || 'Bus';
     select.value = value;
@@ -642,6 +724,7 @@ function setupCustomTypeDropdown() {
     items?.forEach(item => {
       item.classList.toggle('selected', item.dataset.value === value);
     });
+    renderVehicleSeatPills(value);
     renderVehicleSubscriptionPanel();
   };
 
@@ -1999,11 +2082,25 @@ function renderDashboard() {
 // ─── Fleet Grid Render ─────────────────────────────────────
 function renderFleetGrid() {
   const grid = document.getElementById('vehicles-grid');
+  if (!grid) return;
+
   const filtered = state.vehicles.filter(v => {
     const catOk = state.fleetFilter === 'All' || v.type === state.fleetFilter;
+
+    let seatOk = true;
+    if (state.seatFilter && state.seatFilter !== 'All') {
+      const cap = Number(v.capacity) || 0;
+      if (state.seatFilter === 'above49') {
+        seatOk = cap > 49;
+      } else {
+        seatOk = cap === Number(state.seatFilter);
+      }
+    }
+
     const q = state.searchQuery.trim().toLowerCase();
     const searchOk = !q || v.name.toLowerCase().includes(q) || v.operatorName.toLowerCase().includes(q);
-    return catOk && searchOk;
+
+    return catOk && seatOk && searchOk;
   });
 
   if (!filtered.length) {

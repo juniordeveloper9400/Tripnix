@@ -172,18 +172,55 @@ class _ExploreTabState extends State<_ExploreTab> {
     return names;
   }
 
+  List<({String label, int min, int? max})> get _currentSeatBands {
+    final cat = _selectedCategory.toLowerCase();
+    if (cat == 'bus') {
+      return const [
+        (label: 'Any size', min: 0, max: null),
+        (label: '12 Seats', min: 12, max: 12),
+        (label: '22 Seats', min: 22, max: 22),
+        (label: '36 Seats', min: 36, max: 36),
+        (label: '49 Seats', min: 49, max: 49),
+        (label: 'Above 49', min: 50, max: null),
+      ];
+    } else if (cat == 'traveller') {
+      return const [
+        (label: 'Any size', min: 0, max: null),
+        (label: '12 Seats', min: 12, max: 12),
+        (label: '14 Seats', min: 14, max: 14),
+        (label: '16 Seats', min: 16, max: 16),
+        (label: '18 Seats', min: 18, max: 18),
+      ];
+    } else if (cat == 'car') {
+      return const [
+        (label: 'Any size', min: 0, max: null),
+        (label: '4 Seats', min: 4, max: 4),
+        (label: '7 Seats', min: 7, max: 7),
+        (label: '8 Seats', min: 8, max: 8),
+      ];
+    } else {
+      return const [
+        (label: 'Any size', min: 0, max: null),
+        (label: '4–8 Seats', min: 4, max: 8),
+        (label: '12–18 Seats', min: 12, max: 18),
+        (label: '22–36 Seats', min: 22, max: 36),
+        (label: '49+ Seats', min: 49, max: null),
+      ];
+    }
+  }
+
   /// Whether a vehicle seats enough people for band [index], defaulting to the
   /// one currently chosen.
   bool _inSeatBand(Vehicle v, [int? index]) {
-    final band = _seatBands[index ?? _seatBand];
+    final bands = _currentSeatBands;
+    final idx = index ?? _seatBand;
+    if (idx >= bands.length) return true;
+    final band = bands[idx];
     if (v.capacity < band.min) return false;
     return band.max == null || v.capacity <= band.max!;
   }
 
   /// Category, agency and search — every filter except seats.
-  ///
-  /// Shared so the list and the per-band counts can never disagree about what
-  /// "matching" means; they differ only in which seat band they apply.
   bool _matchesOtherFilters(Vehicle v) {
     final matchesCategory =
         _selectedCategory == 'All' ||
@@ -200,8 +237,7 @@ class _ExploreTabState extends State<_ExploreTab> {
   }
 
   /// How many vehicles a seat band would leave, with the *other* filters still
-  /// applied but its own ignored — otherwise every band but the chosen one
-  /// would read zero.
+  /// applied but its own ignored.
   int _countForSeatBand(int index) => _allVehicles
       .where((v) => _matchesOtherFilters(v) && _inSeatBand(v, index))
       .length;
@@ -501,8 +537,8 @@ class _ExploreTabState extends State<_ExploreTab> {
                   scrollDirection: Axis.horizontal,
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
-                    children: List.generate(_seatBands.length, (i) {
-                      final band = _seatBands[i];
+                    children: List.generate(_currentSeatBands.length, (i) {
+                      final band = _currentSeatBands[i];
                       final isSelected = i == _seatBand;
                       final count = _countForSeatBand(i);
                       final empty = count == 0 && i != 0;
@@ -604,9 +640,9 @@ class _ExploreTabState extends State<_ExploreTab> {
                 hasScrollBody: false,
                 child: _EmptyState(
                   noVehiclesAtAll: _allVehicles.isEmpty,
-                  seatBandLabel: _seatBand == 0
+                  seatBandLabel: (_seatBand == 0 || _seatBand >= _currentSeatBands.length)
                       ? null
-                      : _seatBands[_seatBand].label,
+                      : _currentSeatBands[_seatBand].label,
                   onClearSeats: () => setState(() => _seatBand = 0),
                 ),
               )
