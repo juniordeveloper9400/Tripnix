@@ -63,7 +63,6 @@
         <button class="nav-item active" data-tab="dashboard"><span>📊</span> Dashboard</button>
         <button class="nav-item" data-tab="accounts"><span>💰</span> Accounts</button>
         <button class="nav-item" data-tab="gps"><span>📍</span> GPS Tracking</button>
-        <button class="nav-item" data-tab="staff"><span>👥</span> Office Staff</button>
       </nav>
 
       <div class="sidebar-foot">
@@ -248,29 +247,6 @@
             </div>
           </div>
         </section>
-
-        <!-- Staff -->
-        <section id="tab-staff" class="tab-page">
-          <div class="panel">
-            <div class="panel-head">
-              <h3>Office staff logins</h3>
-              <span class="panel-note">They get the admin portal — fleet, diary, trips and bookings. Not this one.</span>
-            </div>
-            <div class="panel-body">
-              <form id="staff-form" class="staff-form">
-                <div class="form-row">
-                  <div class="form-group"><label for="staff-username">Username *</label><input id="staff-username" required /></div>
-                  <div class="form-group"><label for="staff-password">Password *</label><input id="staff-password" type="password" minlength="6" required /></div>
-                </div>
-                <div class="form-row">
-                  <div class="form-group"><label for="staff-name">Person's name</label><input id="staff-name" /></div>
-                  <div class="form-group"><label for="staff-phone">Phone</label><input id="staff-phone" /></div>
-                </div>
-                <button class="btn btn-primary" type="submit" id="staff-save">➕ Create staff login</button>
-              </form>
-              <div id="staff-list"></div>
-            </div>
-          </div>
         </section>
       </div>
     </main>

@@ -11,8 +11,7 @@ const state = {
   vehicles: [],
   tracking: null,
   fleetStatus: [],
-  diary: [],
-  staff: []
+  diary: []
 };
 
 // ─── Helpers ───────────────────────────────────────────────
@@ -167,8 +166,7 @@ function restoreSidebar() {
 const TAB_META = {
   dashboard: ['Dashboard', 'How the money and the fleet are going'],
   accounts:  ['Accounts', 'Capital, income, expenses and how each bus is doing'],
-  gps:       ['GPS Tracking', 'Where every bus last reported from'],
-  staff:     ['Office Staff', 'Logins for the people who run the office']
+  gps:       ['GPS Tracking', 'Where every bus last reported from']
 };
 
 function switchTab(tab) {
@@ -187,7 +185,6 @@ function switchTab(tab) {
 
   if (tab === 'gps') loadTracking();
   if (tab === 'accounts') loadAccounts();
-  if (tab === 'staff') loadStaff();
 }
 
 // ─── Loading ───────────────────────────────────────────────
@@ -196,8 +193,7 @@ async function loadAll() {
   await Promise.allSettled([
     loadDashboard(),
     loadAccounts(),
-    loadTracking(),
-    loadStaff()
+    loadTracking()
   ]);
 }
 
@@ -897,88 +893,11 @@ function renderTracking() {
     : '<p class="empty">No buses in the fleet yet.</p>';
 }
 
-// ─── Staff ─────────────────────────────────────────────────
-
-async function loadStaff() {
-  const u = state.user;
-  try {
-    state.staff = await api(
-      `/auth/staff?operatorName=${encodeURIComponent(u.operatorName)}&ownerUsername=${encodeURIComponent(u.username)}`
-    );
-    renderStaff();
-  } catch (err) {
-    document.getElementById('staff-list').innerHTML =
-      `<p class="empty">❌ ${escapeHtml(err.message)}</p>`;
-  }
-}
-
-function renderStaff() {
-  document.getElementById('staff-list').innerHTML = state.staff.length
-    ? state.staff.map(s => `
-        <div class="row">
-          <div class="row-main">
-            <strong>${escapeHtml(s.ownerName || s.username)}</strong>
-            <code>@${escapeHtml(s.username)}</code>
-            <span class="row-sub">${escapeHtml(s.phone || 'No phone')} · office staff</span>
-          </div>
-          <button class="btn btn-danger btn-sm" onclick="removeStaff('${escapeHtml(s.username)}')">Remove</button>
-        </div>`).join('')
-    : '<p class="empty">No staff logins yet. Create one above and they can sign in to the admin portal.</p>';
-}
-
-async function handleStaffSubmit(e) {
-  e.preventDefault();
-  const btn = document.getElementById('staff-save');
-  btn.disabled = true;
-  btn.textContent = 'Creating…';
-
-  try {
-    const created = await api('/auth/staff', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        operatorName: state.user.operatorName,
-        ownerUsername: state.user.username,
-        username: document.getElementById('staff-username').value.trim(),
-        password: document.getElementById('staff-password').value,
-        ownerName: document.getElementById('staff-name').value.trim(),
-        phone: document.getElementById('staff-phone').value.trim()
-      })
-    });
-    document.getElementById('staff-form').reset();
-    await loadStaff();
-    await showNotice({
-      title: 'Staff login created',
-      lead: `${created.username} can now sign in to the admin portal with the password you set. They will not be able to open this portal.`
-    });
-  } catch (err) {
-    await showNotice({ icon: '⚠️', title: 'Could not create the login', lead: err.message });
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '➕ Create staff login';
-  }
-}
-
-window.removeStaff = async function(username) {
-  if (!confirm(`Remove the login "${username}"? They lose access to the admin portal immediately.`)) return;
-  try {
-    const u = state.user;
-    await api(
-      `/auth/staff/${encodeURIComponent(username)}?operatorName=${encodeURIComponent(u.operatorName)}&ownerUsername=${encodeURIComponent(u.username)}`,
-      { method: 'DELETE' }
-    );
-    await loadStaff();
-  } catch (err) {
-    await showNotice({ icon: '⚠️', title: 'Could not remove the login', lead: err.message });
-  }
-};
-
 // ─── Boot ──────────────────────────────────────────────────
 
 document.getElementById('login-form').addEventListener('submit', handleLogin);
 document.getElementById('logout-btn').addEventListener('click', signOut);
 document.getElementById('refresh-btn').addEventListener('click', loadAll);
-document.getElementById('staff-form').addEventListener('submit', handleStaffSubmit);
 document.getElementById('accounts-month').addEventListener('change', e => loadAccounts(e.target.value));
 document.getElementById('add-entry-btn').addEventListener('click', openEntryModal);
 document.getElementById('entry-close').addEventListener('click', closeEntryModal);
