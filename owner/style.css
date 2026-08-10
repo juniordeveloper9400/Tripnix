@@ -411,3 +411,87 @@ code {
   .sidebar-foot { margin-top: auto; border-top: 1px solid var(--border); padding-top: 14px; flex-direction: column; }
   .agency-block { margin: 16px 0 10px; }
 }
+
+/* ─── Fleet map ──────────────────────────────────────────── */
+
+/* No tile provider: the deployed site's CSP blocks other hosts, so the
+   "map" is a plotted field with a grid for a sense of scale. */
+.map-frame {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background:
+    radial-gradient(circle at 30% 20%, rgba(57, 135, 229, 0.10), transparent 60%),
+    linear-gradient(160deg, #16233a, #101a2c);
+  overflow: hidden;
+}
+
+.map-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 34px 34px;
+}
+
+.map-svg { position: relative; display: block; width: 100%; height: auto; overflow: visible; }
+
+.map-label {
+  font-size: 2.6px;
+  font-weight: 800;
+  fill: var(--text);
+  paint-order: stroke;
+  stroke: rgba(16, 26, 44, 0.85);
+  stroke-width: 0.9px;
+}
+
+.map-bus { cursor: default; }
+.map-bus:hover .map-label { fill: #fff; }
+
+.map-scale {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  font-size: 10px;
+  color: var(--muted);
+  background: rgba(15, 23, 42, 0.7);
+  padding: 2px 7px;
+  border-radius: 20px;
+}
+
+.map-legend {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.map-legend .dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: -1px;
+}
+
+.map-frame.is-empty { min-height: 190px; display: flex; align-items: center; justify-content: center; }
+
+.map-empty {
+  position: relative;
+  text-align: center;
+  padding: 26px 22px;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.map-empty-icon { font-size: 30px; }
+.map-empty strong { font-size: 14px; font-weight: 800; }
+.map-empty span:last-child { font-size: 11.5px; color: var(--muted); line-height: 1.55; }
+
+.panel-link { font-size: 11.5px; color: #93c5fd; text-decoration: none; margin-left: auto; }
+.panel-link:hover { text-decoration: underline; }

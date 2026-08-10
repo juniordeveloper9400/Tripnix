@@ -891,6 +891,109 @@ function renderTracking() {
           </div>`;
       }).join('')
     : '<p class="empty">No buses in the fleet yet.</p>';
+
+  renderTrackingMap(t, 'gps-map', 'gps-map-note');
+  renderTrackingMap(t, 'dash-gps', 'dash-gps-note', { compact: true });
+}
+
+/// A self-contained map of where the buses are.
+///
+/// Drawn as SVG rather than with a tile provider: the deployed site's CSP
+/// blocks scripts and images from other hosts, so Google Maps or Leaflet would
+/// render as an empty box. This plots each bus by its coordinates inside the
+/// area the fleet currently covers — no roads, but it answers "are they
+/// together or spread out, and which one is off on its own".
+function renderTrackingMap(t, targetId, noteId, { compact = false } = {}) {
+  const el = document.getElementById(targetId);
+  if (!el) return;
+
+  const note = noteId ? document.getElementById(noteId) : null;
+  const placed = t.vehicles.filter(v => v.location);
+
+  if (!placed.length) {
+    if (note) note.textContent = t.total ? 'No bus has reported a position yet' : '';
+    el.innerHTML = `
+      <div class="map-frame is-empty">
+        <div class="map-grid" aria-hidden="true"></div>
+        <div class="map-empty">
+          <span class="map-empty-icon">📡</span>
+          <strong>Waiting for the first position</strong>
+          <span>
+            ${t.total
+              ? `${t.total} bus${t.total === 1 ? '' : 'es'} on the books, none reporting yet.`
+              : 'No buses in the fleet yet.'}
+            Buses appear here the moment a tracker posts a fix.
+          </span>
+        </div>
+      </div>`;
+    return;
+  }
+
+  // The window is the area the fleet covers, padded so no bus sits on the
+  // edge. A single bus has no span at all, so it gets a fixed one around it —
+  // otherwise the maths divides by zero and every bus lands in the corner.
+  const lats = placed.map(v => v.location.lat);
+  const lngs = placed.map(v => v.location.lng);
+  const span = Math.max(
+    Math.max(...lats) - Math.min(...lats),
+    Math.max(...lngs) - Math.min(...lngs),
+    0.02
+  ) * 1.35;
+  const midLat = (Math.max(...lats) + Math.min(...lats)) / 2;
+  const midLng = (Math.max(...lngs) + Math.min(...lngs)) / 2;
+
+  const W = 100;
+  const H = compact ? 46 : 62;
+  // Latitude increases northwards but SVG y increases downwards, so north has
+  // to be flipped or the map comes out upside down.
+  const x = lng => ((lng - (midLng - span / 2)) / span) * W;
+  const y = lat => H - ((lat - (midLat - span / 2)) / span) * H;
+
+  const kmAcross = (span * 111).toFixed(span * 111 < 10 ? 1 : 0);
+  if (note) {
+    note.textContent =
+      `${t.reporting} of ${t.total} reporting · about ${kmAcross} km across`;
+  }
+
+  const dots = placed.map(v => {
+    const l = v.location;
+    const live = l.live;
+    // Status colour is backed by the label beneath and the ring shape, never
+    // left to carry the meaning by itself.
+    const fill = live ? '#0ca30c' : '#fab219';
+    const cx = Math.min(W - 4, Math.max(4, x(l.lng)));
+    const cy = Math.min(H - 6, Math.max(6, y(l.lat)));
+
+    return `
+      <g class="map-bus">
+        ${live ? `<circle cx="${cx}" cy="${cy}" r="4.6" fill="${fill}" opacity="0.18"><animate
+            attributeName="r" values="3.4;6.2;3.4" dur="2.4s" repeatCount="indefinite"/><animate
+            attributeName="opacity" values="0.3;0;0.3" dur="2.4s" repeatCount="indefinite"/></circle>` : ''}
+        <circle cx="${cx}" cy="${cy}" r="2.4" fill="${fill}" stroke="#1e293b" stroke-width="0.7"/>
+        <text class="map-label" x="${cx}" y="${cy - 3.6}" text-anchor="middle">
+          ${escapeHtml(v.vehicleNumber || v.vehicleName)}
+        </text>
+        <title>${escapeHtml(v.vehicleName)} · ${live ? 'live' : l.ageMinutes + ' min ago'}${
+          l.label ? ' · ' + escapeHtml(l.label) : ''}</title>
+      </g>`;
+  }).join('');
+
+  const silent = t.total - placed.length;
+
+  el.innerHTML = `
+    <div class="map-frame">
+      <div class="map-grid" aria-hidden="true"></div>
+      <svg viewBox="0 0 ${W} ${H}" class="map-svg" role="img"
+           aria-label="Map of ${placed.length} reporting bus${placed.length === 1 ? '' : 'es'}">
+        ${dots}
+      </svg>
+      <span class="map-scale">~${kmAcross} km</span>
+    </div>
+    <div class="map-legend">
+      <span><i class="dot" style="background:#0ca30c"></i>Live</span>
+      <span><i class="dot" style="background:#fab219"></i>Last seen earlier</span>
+      ${silent ? `<span><i class="dot" style="background:#94a3b8"></i>${silent} not reporting</span>` : ''}
+    </div>`;
 }
 
 // ─── Boot ──────────────────────────────────────────────────

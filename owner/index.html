@@ -123,6 +123,17 @@
 
           <div class="panel">
             <div class="panel-head">
+              <h3>Where the buses are</h3>
+              <span class="panel-note" id="dash-gps-note"></span>
+              <a class="panel-link" href="#" data-goto="gps">Full tracking →</a>
+            </div>
+            <div class="panel-body">
+              <div id="dash-gps"></div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
               <h3>Fleet status right now</h3>
               <span class="panel-note">Where every bus stands today — posted trips, diary orders and free days</span>
             </div>
@@ -221,6 +232,16 @@
 
         <!-- GPS -->
         <section id="tab-gps" class="tab-page">
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Where the buses are</h3>
+              <span class="panel-note" id="gps-map-note"></span>
+            </div>
+            <div class="panel-body">
+              <div id="gps-map"></div>
+            </div>
+          </div>
+
           <div class="panel">
             <div class="panel-head">
               <h3>Live positions</h3>
