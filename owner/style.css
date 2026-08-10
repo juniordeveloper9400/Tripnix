@@ -426,16 +426,9 @@ code {
   overflow: hidden;
 }
 
-.map-grid {
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
-  background-size: 34px 34px;
-}
-
-.map-svg { position: relative; display: block; width: 100%; height: auto; overflow: visible; }
+/* The whole map is drawn in the SVG now — ground, streets, water and pins —
+   so no CSS overlay sits on top of it. */
+.map-svg { position: relative; display: block; width: 100%; height: auto; }
 
 .map-label {
   font-size: 2.6px;
@@ -449,16 +442,33 @@ code {
 .map-bus { cursor: default; }
 .map-bus:hover .map-label { fill: #fff; }
 
-.map-scale {
+.map-compass-n { font-size: 2.6px; font-weight: 800; fill: #e2e8f0; }
+
+/* A bar with its distance, the way a map states scale — the number alone does
+   not say what length it refers to. */
+.map-scalebar {
   position: absolute;
-  right: 10px;
+  left: 10px;
   bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
   font-size: 10px;
-  color: var(--muted);
-  background: rgba(15, 23, 42, 0.7);
-  padding: 2px 7px;
+  color: #cbd5e1;
+  background: rgba(13, 21, 38, 0.72);
+  padding: 3px 9px;
   border-radius: 20px;
 }
+
+.map-scalebar-line {
+  width: 30px;
+  height: 5px;
+  border: 1px solid #cbd5e1;
+  border-top: none;
+  opacity: 0.85;
+}
+
+.map-disclaimer { margin-left: auto; font-style: italic; opacity: 0.75; }
 
 .map-legend {
   display: flex;
@@ -479,6 +489,15 @@ code {
 }
 
 .map-frame.is-empty { min-height: 190px; display: flex; align-items: center; justify-content: center; }
+
+/* The drawn map fills the frame and the message sits over it, rather than the
+   two stacking as flex siblings. */
+.map-frame.is-empty .map-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
 
 .map-empty {
   position: relative;

@@ -48,7 +48,14 @@ class Vehicle {
   final List<String> imageUrls;
   final List<String> videoUrls;
   final String description;
+  /// Worked out by the API from the vehicle's amenities, not from reviews —
+  /// there are no reviews yet, and every vehicle used to show a flat 5.0.
   final double rating;
+
+  /// The word for that score: Standard / Comfort / Premium / Luxury. Shown
+  /// beside the number so the rating means something on its own.
+  final String ratingLabel;
+
   final int reviewsCount;
   final String instagramUrl;
   final String contactPhone;
@@ -67,6 +74,7 @@ class Vehicle {
     required this.videoUrls,
     required this.description,
     required this.rating,
+    this.ratingLabel = '',
     required this.reviewsCount,
     this.instagramUrl = '',
     this.contactPhone = '',
@@ -86,7 +94,10 @@ class Vehicle {
       imageUrls: (json['imageUrls'] as List<dynamic>?)?.map((e) => e as String).toList() ?? [],
       videoUrls: (json['videoUrls'] as List<dynamic>?)?.map((e) => e as String).toList() ?? [],
       description: json['description'] as String? ?? "",
-      rating: (json['rating'] as num? ?? 5.0).toDouble(),
+      // 3.0 is the API's floor for a vehicle with no amenities, so it is the
+      // right fallback — 5.0 would flatter a listing the API never rated.
+      rating: (json['rating'] as num? ?? 3.0).toDouble(),
+      ratingLabel: json['ratingLabel'] as String? ?? '',
       reviewsCount: json['reviewsCount'] as int? ?? 0,
       instagramUrl: json['instagramUrl'] as String? ?? '',
       contactPhone: json['contactPhone'] as String? ?? '',
@@ -108,6 +119,7 @@ class Vehicle {
       'videoUrls': videoUrls,
       'description': description,
       'rating': rating,
+      'ratingLabel': ratingLabel,
       'reviewsCount': reviewsCount,
       'instagramUrl': instagramUrl,
     };

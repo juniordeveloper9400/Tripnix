@@ -251,17 +251,40 @@ class VehicleCard extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        Row(
+                        // The score comes from the amenities the agency listed,
+                        // so the word beside it says what the number means —
+                        // a bare "4.2" reads as a review average, which it is
+                        // not.
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.star, size: 16, color: AppColors.yellow),
-                            const SizedBox(width: 4),
-                            Text(
-                              vehicle.rating.toStringAsFixed(1),
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                              ),
+                            Row(
+                              children: [
+                                const Icon(
+                                  Icons.star,
+                                  size: 16,
+                                  color: AppColors.yellow,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  vehicle.rating.toStringAsFixed(1),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ],
                             ),
+                            if (vehicle.ratingLabel.isNotEmpty)
+                              Text(
+                                vehicle.ratingLabel,
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.grey[600],
+                                ),
+                              ),
                           ],
                         ),
                       ],

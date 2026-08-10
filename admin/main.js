@@ -2043,7 +2043,14 @@ function renderFleetGrid() {
           </div>` : ''}
         <div class="card-specs">
           <span>👥 ${v.capacity} Seats</span>
-          <span>⭐ ${v.rating?.toFixed(1) ?? '5.0'}</span>
+          <span title="Worked out from this vehicle's ${v.ratedOn || 0} amenit${v.ratedOn === 1 ? 'y' : 'ies'} — tick more in Edit to raise it">
+            ⭐ ${(v.rating ?? 3).toFixed(1)} · ${escapeHtml(v.ratingLabel || 'Standard')}
+          </span>
+        </div>
+        <div class="rating-basis">
+          ${(v.features || []).length
+            ? (v.features || []).map(f => `<span class="feature-pill">${escapeHtml(f)}</span>`).join('')
+            : `<span class="feature-empty">No amenities ticked — add some in Edit to raise the rating</span>`}
         </div>
         <div style="margin-top:10px;">
           <span style="font-size:11px;font-weight:600;color:var(--text-muted);display:block;margin-bottom:4px;">📅 Available Showcase Dates:</span>

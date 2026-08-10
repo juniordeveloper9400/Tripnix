@@ -112,23 +112,27 @@
             </div>
           </div>
 
-          <div class="panel">
-            <div class="panel-head">
-              <h3>Profit by bus</h3>
-              <span class="panel-note" id="dash-vehicles-note"></span>
-              <a class="panel-link" href="#" data-goto="accounts">Full accounts →</a>
+          <!-- The map sits beside a chart, so the owner sees the money and the
+               fleet in one glance rather than scrolling between them. -->
+          <div class="panel-grid">
+            <div class="panel">
+              <div class="panel-head">
+                <h3>Profit by bus</h3>
+                <span class="panel-note" id="dash-vehicles-note"></span>
+                <a class="panel-link" href="#" data-goto="accounts">Full accounts →</a>
+              </div>
+              <div class="panel-body"><div id="dash-chart-vehicles"></div></div>
             </div>
-            <div class="panel-body"><div id="dash-chart-vehicles"></div></div>
-          </div>
 
-          <div class="panel">
-            <div class="panel-head">
-              <h3>Where the buses are</h3>
-              <span class="panel-note" id="dash-gps-note"></span>
-              <a class="panel-link" href="#" data-goto="gps">Full tracking →</a>
-            </div>
-            <div class="panel-body">
-              <div id="dash-gps"></div>
+            <div class="panel">
+              <div class="panel-head">
+                <h3>Where the buses are</h3>
+                <span class="panel-note" id="dash-gps-note"></span>
+                <a class="panel-link" href="#" data-goto="gps">Full tracking →</a>
+              </div>
+              <div class="panel-body">
+                <div id="dash-gps"></div>
+              </div>
             </div>
           </div>
 

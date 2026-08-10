@@ -55,6 +55,61 @@ async function reserveVehicleId() {
   return id;
 }
 
+/// What each amenity is worth towards a vehicle's rating.
+///
+/// Weighted rather than counted, because they are not equal: air conditioning
+/// or a washroom changes a fourteen-hour journey, a sunroof does not. Anything
+/// an agency types that is not listed here still counts, at the lowest weight —
+/// an unknown amenity is worth something, just not more than a washroom.
+const AMENITY_WEIGHTS = {
+  ac: 1.2,
+  "sleeper berths": 1.0,
+  restroom: 0.9,
+  wifi: 0.7,
+  "usb charger": 0.5,
+  "audio system": 0.5,
+  "4wd": 0.4,
+  sunroof: 0.4
+};
+
+const UNKNOWN_AMENITY_WEIGHT = 0.3;
+const MAX_AMENITY_SCORE = Object.values(AMENITY_WEIGHTS).reduce((a, b) => a + b, 0);
+
+/// A vehicle's rating, derived from what it actually offers.
+///
+/// It used to be hardcoded to 5.0 on every vehicle ever created, which made the
+/// star meaningless — a bare bus and a fully equipped sleeper both showed five.
+/// The floor is 3.0 rather than 0: a plain bus is a working bus, and rating it
+/// one star would be wrong as well as useless for comparing listings.
+export function ratingFromFeatures(features) {
+  const list = Array.isArray(features) ? features : [];
+
+  // Counted once each. The admin's checkboxes cannot produce a duplicate, but
+  // the API takes any array, so listing "AC" three times would otherwise score
+  // it three times and buy a Premium badge for a bus with one amenity.
+  const unique = new Set(
+    list.map((raw) => String(raw || "").trim().toLowerCase()).filter(Boolean)
+  );
+
+  const score = [...unique].reduce(
+    (sum, key) => sum + (AMENITY_WEIGHTS[key] ?? UNKNOWN_AMENITY_WEIGHT),
+    0
+  );
+
+  const capped = Math.min(score, MAX_AMENITY_SCORE);
+  const rating = 3 + (capped / MAX_AMENITY_SCORE) * 2;
+  return Math.round(rating * 10) / 10;
+}
+
+/// The word beside the stars, so the number is never the only thing carrying
+/// the meaning.
+export function ratingLabel(rating) {
+  if (rating >= 4.6) return "Luxury";
+  if (rating >= 4.0) return "Premium";
+  if (rating >= 3.5) return "Comfort";
+  return "Standard";
+}
+
 /// Fills in every field a vehicle record is expected to have.
 ///
 /// The Realtime Database does not store empty arrays or empty objects at all,
@@ -62,6 +117,13 @@ async function reserveVehicleId() {
 /// entirely. Writing that `undefined` straight back is rejected outright, which
 /// silently broke editing — so records are normalised on the way in and out.
 function normaliseVehicle(raw) {
+  const features = Array.isArray(raw.features) ? raw.features : [];
+  // Derived on every read rather than stored, so editing a vehicle's amenities
+  // moves its rating straight away. A stored figure would need every existing
+  // record rewritten to change the formula, and would drift the moment one
+  // write failed.
+  const rating = ratingFromFeatures(features);
+
   return {
     ...raw,
     id: Number(raw.id),
@@ -77,7 +139,11 @@ function normaliseVehicle(raw) {
     videoUrls: Array.isArray(raw.videoUrls) ? raw.videoUrls : [],
     description: raw.description ?? "",
     instagramUrl: raw.instagramUrl ?? "",
-    rating: Number(raw.rating ?? 5),
+    rating,
+    ratingLabel: ratingLabel(rating),
+    // How many distinct amenities the rating was worked out from, so a client
+    // can say *why* a bus scores what it does instead of showing a bare number.
+    ratedOn: new Set(features.map((f) => String(f).trim().toLowerCase())).size,
     reviewsCount: Number(raw.reviewsCount ?? 0),
     createdAt: raw.createdAt ?? new Date().toISOString(),
 
@@ -91,6 +157,16 @@ function normaliseVehicle(raw) {
     // how long, and so the credited days can be audited against the plan.
     holdHistory: Array.isArray(raw.holdHistory) ? raw.holdHistory : []
   };
+}
+
+/// Strips the fields that are worked out on read, so they are never written.
+///
+/// Storing a derived rating would freeze it at whatever the formula said the
+/// day it was saved: change the weights, and every existing vehicle keeps its
+/// old score until it happens to be edited again.
+function forStorage(vehicle) {
+  const { rating, ratingLabel: label, ratedOn, ...stored } = vehicle;
+  return stored;
 }
 
 /// Whole days a bus has been on hold, counting the day it went on hold.
@@ -325,7 +401,8 @@ router.post("/", async (req, res) => {
     videoUrls: Array.isArray(videoUrls) ? videoUrls : [],
     description: description || "No description provided.",
     instagramUrl: instagramUrl ? String(instagramUrl).trim() : "",
-    rating: 5.0,
+    // No rating stored: it is worked out from the amenities on every read, so
+    // a stored one would only go stale the first time they were edited.
     reviewsCount: 0,
     createdAt: new Date().toISOString()
   });
@@ -334,7 +411,7 @@ router.post("/", async (req, res) => {
 
   if (databaseConfigured) {
     try {
-      await vehiclesRef().child(String(newVehicle.id)).set(newVehicle);
+      await vehiclesRef().child(String(newVehicle.id)).set(forStorage(newVehicle));
     } catch (e) {
       // A swallowed write is what makes a bus "disappear": the agency is told
       // the save worked, the record survives only in this instance's memory,
@@ -411,7 +488,7 @@ router.put("/:id", async (req, res) => {
 
   if (databaseConfigured) {
     try {
-      await vehiclesRef().child(String(id)).update(vehicles[index]);
+      await vehiclesRef().child(String(id)).update(forStorage(vehicles[index]));
     } catch (e) {
       console.error("Database update vehicle error:", e);
     }
