@@ -90,7 +90,11 @@ function normaliseSub(raw) {
     amount: Number(raw.amount ?? 0),
     startsAt: raw.startsAt ?? new Date(0).toISOString(),
     expiresAt: raw.expiresAt ?? new Date(0).toISOString(),
-    renewedAt: raw.renewedAt ?? null
+    renewedAt: raw.renewedAt ?? null,
+    // Days already given back for buses on hold. Realtime Database drops an
+    // empty array entirely, so it has to be restored here or a first hold would
+    // credit against undefined.
+    creditedHoldDates: Array.isArray(raw.creditedHoldDates) ? raw.creditedHoldDates : []
   };
 }
 
@@ -378,8 +382,38 @@ export function hasActiveFleetSubscription(operatorName) {
 /// hides the whole fleet.
 export function isVehiclePubliclyListed(vehicle) {
   if (!vehicle) return false;
+  // A bus in the workshop cannot take a traveller anywhere, so it comes off the
+  // app until the agency puts it back. The days it sat out are credited to the
+  // fleet plan on the way back, by creditHeldDays() below.
+  if (vehicle.onHold) return false;
   if (!hasActivePlatformMembership(vehicle.operatorName)) return false;
   return hasActiveFleetSubscription(vehicle.operatorName);
+}
+
+/// Pushes the fleet plan's expiry out by the days a bus spent off the road.
+///
+/// `dates` are the individual days held, and only ones not already credited
+/// count. That matters because the fee covers the whole fleet, not each bus:
+/// holding three buses across the same fortnight is one fortnight of lost
+/// visibility, not three. Summing per-bus days would let an agency hold its
+/// fleet in rotation and extend the plan indefinitely.
+export async function creditHeldDays(operatorName, dates) {
+  const existing = fleetSubFor(operatorName);
+  if (!existing) return { credited: 0, sub: null };
+
+  const already = new Set(existing.creditedHoldDates || []);
+  const fresh = [...new Set(dates)].filter((d) => !already.has(d));
+  if (!fresh.length) return { credited: 0, sub: withStatus(existing) };
+
+  const sub = {
+    ...existing,
+    creditedHoldDates: [...already, ...fresh].sort(),
+    expiresAt: addDays(new Date(existing.expiresAt), fresh.length).toISOString()
+  };
+
+  fleetSubs = [...fleetSubs.filter((s) => s !== existing), sub];
+  await saveFleetSub(sub);
+  return { credited: fresh.length, sub: withStatus(sub) };
 }
 
 /// Agencies currently visible to travellers, with their fleet size.

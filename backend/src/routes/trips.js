@@ -304,6 +304,17 @@ router.post("/", async (req, res) => {
   ) {
     return res.status(403).json({ error: "That vehicle belongs to another agency" });
   }
+  // A held bus fails the listed check too, so it has to be named separately —
+  // telling an agency its subscription has lapsed when the real reason is that
+  // the bus is in the workshop sends them to the wrong screen entirely.
+  if (vehicle.onHold) {
+    return res.status(409).json({
+      error:
+        `${vehicle.name} is on hold${vehicle.holdReason ? ` (${vehicle.holdReason})` : ""}, ` +
+        "so it cannot take a trip. Take it off hold from the Fleet page first.",
+      reason: "vehicle-on-hold"
+    });
+  }
   if (!isVehiclePubliclyListed(vehicle)) {
     return res.status(402).json({
       error: `${vehicle.name} has no active subscription, so trips on it would not be visible. Subscribe the vehicle first.`

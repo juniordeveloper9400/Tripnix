@@ -2016,13 +2016,18 @@ function renderFleetGrid() {
       ? dates.map(d => `<span class="date-pill">${d}</span>`).join('')
       : `<span style="font-size:11px;color:var(--text-muted);">No dates posted yet</span>`;
 
+    // A bus in the workshop is still in the fleet but off the app, so the card
+    // says so plainly rather than looking identical to a running bus.
+    const heldDays = v.onHold ? daysOnHold(v.heldSince) : 0;
+
     return `
-    <div class="vehicle-admin-card">
+    <div class="vehicle-admin-card${v.onHold ? ' is-held' : ''}">
       <div class="card-image">
         ${(v.imageUrls || [])[0]
           ? `<img src="${(v.imageUrls || [])[0]}" alt="${escapeHtml(v.name)}" />`
           : `<div class="card-image-empty">No photo uploaded</div>`}
         <span class="card-badge">${v.type.toUpperCase()}</span>
+        ${v.onHold ? `<span class="card-hold-badge">⏸️ ON HOLD</span>` : ''}
       </div>
       <div class="card-body">
         <h4 class="card-title">${escapeHtml(v.name)}</h4>
@@ -2030,6 +2035,12 @@ function renderFleetGrid() {
           <code class="vehicle-number">${escapeHtml(v.vehicleNumber || '—')}</code>
           &nbsp;·&nbsp; ${escapeHtml(v.operatorName)}
         </p>
+        ${v.onHold ? `
+          <div class="hold-note">
+            <strong>Off the app for ${heldDays} day${heldDays === 1 ? '' : 's'}</strong>
+            <span>${v.holdReason ? escapeHtml(v.holdReason) + ' · ' : ''}since ${formatDate(v.heldSince)}</span>
+            <span>These days are added back to your plan when you resume it.</span>
+          </div>` : ''}
         <div class="card-specs">
           <span>👥 ${v.capacity} Seats</span>
           <span>⭐ ${v.rating?.toFixed(1) ?? '5.0'}</span>
@@ -2040,6 +2051,9 @@ function renderFleetGrid() {
         </div>
         <div class="card-footer" style="margin-top:14px;">
           <div class="card-actions" style="margin-left:auto;">
+            ${v.onHold
+              ? `<button class="btn btn-primary btn-sm" onclick="resumeVehicle(${v.id})">▶️ Resume</button>`
+              : `<button class="btn btn-secondary btn-sm" onclick="holdVehicle(${v.id})">⏸️ Hold</button>`}
             <button class="btn btn-secondary btn-sm" onclick="editVehicle(${v.id})">✏️ Edit</button>
             <button class="btn btn-secondary btn-sm" style="color:var(--accent-red);" onclick="deleteVehicle(${v.id})">🗑️ Delete</button>
           </div>
@@ -2462,6 +2476,99 @@ async function handleVehicleFormSubmit(e) {
 window.editVehicle = function(id) {
   const v = state.vehicles.find(v => v.id === id);
   if (v) openVehicleModal(v);
+};
+
+// ─── Holding a bus off the road ────────────────────────────
+
+/// Whole days a bus has been on hold, counting the day it went on hold — the
+/// same reckoning the API credits by, so the card never quotes a different
+/// number from the one the plan is extended by.
+function daysOnHold(heldSince) {
+  const from = new Date(`${heldSince}T00:00:00`);
+  if (Number.isNaN(from.getTime())) return 0;
+  const startDay = Date.UTC(from.getFullYear(), from.getMonth(), from.getDate());
+  const now = new Date();
+  const endDay = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.max(1, Math.round((endDay - startDay) / 86400000) + 1);
+}
+
+window.holdVehicle = async function(id) {
+  const vehicle = state.vehicles.find(v => v.id === id);
+  if (!vehicle) return;
+
+  const reason = prompt(
+    `Hold "${vehicle.name}" off the app?\n\n` +
+    `It stays in your fleet but travellers stop seeing it, and it cannot be given a trip. ` +
+    `Every day it is held is added back to your fleet plan when you resume it.\n\n` +
+    `Why is it off the road? (optional)`,
+    'Workshop / maintenance'
+  );
+  // prompt() returns null on Cancel and '' when the reason is cleared — only
+  // the first means "do not do this".
+  if (reason === null) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/vehicles/${id}/hold`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operatorName: vehicle.operatorName, reason })
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.error || 'Could not hold this vehicle');
+
+    await loadData();
+    await showNotice({
+      icon: '⏸️',
+      title: `${vehicle.name} is on hold`,
+      lead: 'Travellers can no longer see it. Resume it when it is back on the road and the days it sat out will be added to your fleet plan.'
+    });
+  } catch (err) {
+    alert('❌ ' + err.message);
+  }
+};
+
+window.resumeVehicle = async function(id) {
+  const vehicle = state.vehicles.find(v => v.id === id);
+  if (!vehicle) return;
+
+  const days = daysOnHold(vehicle.heldSince);
+  if (!confirm(
+    `Put "${vehicle.name}" back on the app?\n\n` +
+    `It has been on hold for ${days} day${days === 1 ? '' : 's'}. ` +
+    `Those days will be added to your fleet plan's expiry.`
+  )) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/vehicles/${id}/resume`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operatorName: vehicle.operatorName })
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.error || 'Could not resume this vehicle');
+
+    await loadData();
+
+    const hold = data.hold || {};
+    // Credited can be fewer than held when another bus was off the road over
+    // the same dates — those days were already given back once.
+    const lead = hold.creditedDays === hold.days
+      ? `It was off the app for ${hold.days} day${hold.days === 1 ? '' : 's'}, and your fleet plan has been extended by the same.`
+      : hold.creditedDays > 0
+        ? `It was off the app for ${hold.days} days. ${hold.creditedDays} were added to your plan — the rest overlapped another bus's hold and had already been credited.`
+        : `It was off the app for ${hold.days} day${hold.days === 1 ? '' : 's'}, all of which overlapped another bus's hold and had already been added to your plan.`;
+
+    await showNotice({
+      icon: '▶️',
+      title: `${vehicle.name} is back on the app`,
+      lead,
+      lines: hold.fleetExpiresAt
+        ? [{ label: 'Fleet plan now runs until', value: formatDate(hold.fleetExpiresAt) }]
+        : []
+    });
+  } catch (err) {
+    alert('❌ ' + err.message);
+  }
 };
 
 window.deleteVehicle = async function(id) {

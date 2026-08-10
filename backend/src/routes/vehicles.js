@@ -5,7 +5,8 @@ import {
   listedAgencies,
   activateFleetSubscription,
   refreshSubscriptionsFromDb,
-  fleetTierFor
+  fleetTierFor,
+  creditHeldDays
 } from "./subscriptions.js";
 import {
   removeTripsForVehicle,
@@ -78,8 +79,31 @@ function normaliseVehicle(raw) {
     instagramUrl: raw.instagramUrl ?? "",
     rating: Number(raw.rating ?? 5),
     reviewsCount: Number(raw.reviewsCount ?? 0),
-    createdAt: raw.createdAt ?? new Date().toISOString()
+    createdAt: raw.createdAt ?? new Date().toISOString(),
+
+    // A bus off the road — in the workshop, or otherwise unable to run. It stays
+    // in the agency's fleet but drops out of the traveller app until it is
+    // brought back, and the days it sat out are added to the fleet plan.
+    onHold: Boolean(raw.onHold),
+    heldSince: raw.heldSince ?? null,
+    holdReason: raw.holdReason ?? "",
+    // Every past hold, so an agency can see why a bus was off the road and for
+    // how long, and so the credited days can be audited against the plan.
+    holdHistory: Array.isArray(raw.holdHistory) ? raw.holdHistory : []
   };
+}
+
+/// Whole days a bus has been on hold, counting the day it went on hold.
+///
+/// Inclusive because a bus pulled off the road this morning is already not
+/// earning today — charging the agency for today would be the thing the credit
+/// exists to prevent.
+export function heldDaysSince(heldSince, until = new Date()) {
+  const from = new Date(heldSince);
+  if (Number.isNaN(from.getTime())) return 0;
+  const startDay = Date.UTC(from.getFullYear(), from.getMonth(), from.getDate());
+  const endDay = Date.UTC(until.getFullYear(), until.getMonth(), until.getDate());
+  return Math.max(1, Math.round((endDay - startDay) / 86400000) + 1);
 }
 
 function vehiclesRef() {
@@ -394,6 +418,141 @@ router.put("/:id", async (req, res) => {
   }
 
   res.json(vehicles[index]);
+});
+
+// ─── Holding a bus off the road ────────────────────────────
+
+/// Every date from `from` up to and including `to`, as YYYY-MM-DD.
+function datesBetween(from, to) {
+  const dates = [];
+  for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
+    dates.push(isoDate(d));
+  }
+  return dates;
+}
+
+// POST /api/vehicles/:id/hold - take a bus off the app (workshop, repairs)
+router.post("/:id/hold", async (req, res) => {
+  const id = Number(req.params.id);
+  const { operatorName, reason } = req.body;
+
+  await refreshVehiclesFromDb();
+  const index = vehicles.findIndex((v) => v.id === id);
+  if (index === -1) return res.status(404).json({ error: "Vehicle not found" });
+
+  const vehicle = vehicles[index];
+  if (
+    operatorName &&
+    String(vehicle.operatorName).trim().toLowerCase() !==
+      String(operatorName).trim().toLowerCase()
+  ) {
+    return res.status(403).json({ error: "That vehicle belongs to another agency" });
+  }
+  if (vehicle.onHold) {
+    return res.status(409).json({ error: `${vehicle.name} is already on hold` });
+  }
+
+  const patch = {
+    onHold: true,
+    heldSince: isoDate(new Date()),
+    holdReason: String(reason || "").trim()
+  };
+  vehicles[index] = { ...vehicle, ...patch };
+
+  if (databaseConfigured) {
+    try {
+      await vehiclesRef().child(String(id)).update(patch);
+    } catch (e) {
+      console.error("Database hold vehicle error:", e);
+      vehicles[index] = vehicle;
+      const described = describeDatabaseError(e);
+      return res.status(described?.status || 503).json({
+        error: described?.message || `Could not hold ${vehicle.name}: ${e.message}`
+      });
+    }
+  }
+
+  res.json(vehicles[index]);
+});
+
+// POST /api/vehicles/:id/resume - put the bus back on the app
+//
+// The days it sat out are added to the agency's fleet plan, so a bus in the
+// workshop does not burn the visibility the agency paid for.
+router.post("/:id/resume", async (req, res) => {
+  const id = Number(req.params.id);
+  const { operatorName } = req.body;
+
+  await refreshVehiclesFromDb();
+  const index = vehicles.findIndex((v) => v.id === id);
+  if (index === -1) return res.status(404).json({ error: "Vehicle not found" });
+
+  const vehicle = vehicles[index];
+  if (
+    operatorName &&
+    String(vehicle.operatorName).trim().toLowerCase() !==
+      String(operatorName).trim().toLowerCase()
+  ) {
+    return res.status(403).json({ error: "That vehicle belongs to another agency" });
+  }
+  if (!vehicle.onHold) {
+    return res.status(409).json({ error: `${vehicle.name} is not on hold` });
+  }
+
+  const from = new Date(`${vehicle.heldSince}T00:00:00`);
+  const today = new Date();
+  const held = Number.isNaN(from.getTime()) ? [] : datesBetween(from, today);
+  const days = held.length;
+
+  const entry = {
+    from: vehicle.heldSince,
+    to: isoDate(today),
+    days,
+    reason: vehicle.holdReason || ""
+  };
+
+  const patch = {
+    onHold: false,
+    heldSince: null,
+    holdReason: "",
+    holdHistory: [...(vehicle.holdHistory || []), entry]
+  };
+  vehicles[index] = { ...vehicle, ...patch };
+
+  if (databaseConfigured) {
+    try {
+      await vehiclesRef().child(String(id)).update(patch);
+    } catch (e) {
+      console.error("Database resume vehicle error:", e);
+      vehicles[index] = vehicle;
+      const described = describeDatabaseError(e);
+      return res.status(described?.status || 503).json({
+        error: described?.message || `Could not bring ${vehicle.name} back: ${e.message}`
+      });
+    }
+  }
+
+  // Crediting is separate from the vehicle write on purpose: if it fails the
+  // bus is still back on the app, which is the part the agency asked for.
+  let credit = { credited: 0, sub: null };
+  try {
+    credit = await creditHeldDays(vehicle.operatorName, held);
+  } catch (e) {
+    console.error("Fleet plan credit error:", e);
+  }
+
+  res.json({
+    ...vehicles[index],
+    hold: {
+      days,
+      from: entry.from,
+      to: entry.to,
+      // Days actually added — fewer than `days` when another bus was already
+      // on hold over the same dates and those days have been credited once.
+      creditedDays: credit.credited,
+      fleetExpiresAt: credit.sub?.expiresAt || null
+    }
+  });
 });
 
 // DELETE /api/vehicles/:id
