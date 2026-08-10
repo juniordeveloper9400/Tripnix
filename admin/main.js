@@ -11,6 +11,7 @@ let state = {
   plans: null,          // plan catalogue from the backend
   subscription: null,   // this agency's platform membership + fleet plan
   accounts: null,       // the money ledger for the selected month
+  accountCategories: null, // capital/income/expense category lists from the API
   tracking: null,       // last known position per bus
   agencySubs: [],       // super admin: every agency's subscription state
   trips: [],            // trips this agency has posted
@@ -280,12 +281,110 @@ async function loadAccounts(month) {
     const res = await fetch(`${API_BASE}/accounts?operatorName=${encodeURIComponent(operatorName)}${q}`);
     if (!res.ok) throw new Error('Could not load accounts');
     state.accounts = await res.json();
+
+    // The category lists come from the API so the two portals always offer the
+    // same ones — a category invented here would not match the owner's books.
+    if (!state.accountCategories) {
+      const catRes = await fetch(`${API_BASE}/accounts/categories`);
+      if (catRes.ok) state.accountCategories = await catRes.json();
+    }
+
     renderAccounts();
   } catch (err) {
     document.getElementById('acc-breakdown').innerHTML =
       `<p class="diary-empty">❌ ${escapeHtml(err.message)}</p>`;
   }
 }
+
+// ─── Adding to the books ───────────────────────────────────
+
+function openAccEntryModal() {
+  if (!state.vehicles.length) {
+    return alert('❌ Add a bus to your fleet first.');
+  }
+  document.getElementById('acc-entry-date').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('acc-entry-amount').value = '';
+  document.getElementById('acc-entry-note').value = '';
+  syncAccEntryKind(document.querySelector('input[name="acc-kind"]:checked')?.value || 'income');
+  document.getElementById('acc-entry-modal').classList.remove('hidden');
+  document.getElementById('acc-entry-amount').focus();
+}
+
+function closeAccEntryModal() {
+  document.getElementById('acc-entry-modal').classList.add('hidden');
+  document.getElementById('acc-entry-form').reset();
+}
+
+/// Keeps the form honest about what each kind needs: capital belongs to one
+/// bus, the other two may sit against the agency as a whole.
+function syncAccEntryKind(kind) {
+  const cats = state.accountCategories?.categories?.[kind] || [];
+  document.getElementById('acc-entry-category').innerHTML =
+    cats.map(c => `<option>${escapeHtml(c)}</option>`).join('');
+
+  const options = state.vehicles.map(v =>
+    `<option value="${v.id}">${escapeHtml(v.name)} · ${escapeHtml(v.vehicleNumber || '—')}</option>`);
+  document.getElementById('acc-entry-vehicle').innerHTML = kind === 'capital'
+    ? options.join('')
+    : `<option value="">Whole agency</option>` + options.join('');
+
+  document.getElementById('acc-entry-vehicle-req').textContent = kind === 'capital' ? '*' : '';
+  document.getElementById('acc-entry-hint').textContent = kind === 'capital'
+    ? 'What the bus cost to buy. Recorded once, not as a monthly expense — it is the sum the bus has to earn back.'
+    : kind === 'income'
+      ? 'Money in that is not already a diary order — a private contract, a rental, anything else.'
+      : 'Money out: fuel, driver wages, servicing, insurance, an EMI. Leave the bus blank for costs that cover the whole agency.';
+}
+
+async function handleAccEntrySubmit(e) {
+  e.preventDefault();
+  const btn = document.getElementById('acc-entry-save');
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+
+  try {
+    const res = await fetch(`${API_BASE}/accounts/entries`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        operatorName: state.currentUser.operatorName,
+        kind: document.querySelector('input[name="acc-kind"]:checked').value,
+        vehicleId: document.getElementById('acc-entry-vehicle').value || null,
+        amount: document.getElementById('acc-entry-amount').value,
+        date: document.getElementById('acc-entry-date').value,
+        category: document.getElementById('acc-entry-category').value,
+        note: document.getElementById('acc-entry-note').value.trim()
+      })
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.error || 'Could not save this entry');
+
+    closeAccEntryModal();
+    // Reload on the month the entry landed in, so a cost dated last month is
+    // not saved into a view that then fails to show it.
+    await loadAccounts(String(data.date).slice(0, 7));
+  } catch (err) {
+    alert('❌ ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
+window.removeAccEntry = async function(id) {
+  if (!confirm('Remove this entry from the books?')) return;
+  try {
+    const res = await fetch(
+      `${API_BASE}/accounts/entries/${id}?operatorName=${encodeURIComponent(state.currentUser.operatorName)}`,
+      { method: 'DELETE' }
+    );
+    if (!res.ok) throw new Error('Could not remove this entry');
+    await loadAccounts(state.accounts?.month);
+  } catch (err) {
+    alert('❌ ' + err.message);
+  }
+};
 
 function renderAccounts() {
   const a = state.accounts;
@@ -356,9 +455,19 @@ function renderAccounts() {
               ${formatDate(e.date)}${e.detail ? ' · ' + escapeHtml(e.detail) : ''}
             </div>
           </div>
-          <strong style="color:${e.sign === '−' ? 'var(--accent-red)' : 'inherit'};">${e.sign}${money(e.amount)}</strong>
+          <div class="diary-row-status">
+            <strong style="color:${e.sign === '−' ? 'var(--accent-red)' : 'inherit'};">${e.sign}${money(e.amount)}</strong>
+            ${e.source === 'diary'
+              // A diary fare belongs to its order — removing it here would
+              // leave the bus booked with no money against it.
+              ? ''
+              : `<div class="diary-row-actions">
+                   <button class="btn btn-secondary btn-sm" style="color:var(--accent-red);"
+                           onclick="removeAccEntry(${e.id})">🗑️</button>
+                 </div>`}
+          </div>
         </div>`).join('')
-    : '<p class="diary-empty">Nothing recorded for this month yet.</p>';
+    : '<p class="diary-empty">Nothing recorded for this month yet. Use ➕ Add entry to record fuel, wages, servicing or extra income.</p>';
 }
 
 // ─── GPS tracking ──────────────────────────────────────────
@@ -449,6 +558,12 @@ function setupEventListeners() {
   document.getElementById('diary-modal-cancel')?.addEventListener('click', closeDiaryModal);
   document.getElementById('diary-form')?.addEventListener('submit', handleDiarySubmit);
   document.getElementById('acc-month')?.addEventListener('change', e => loadAccounts(e.target.value));
+  document.getElementById('acc-add-btn')?.addEventListener('click', openAccEntryModal);
+  document.getElementById('acc-entry-close')?.addEventListener('click', closeAccEntryModal);
+  document.getElementById('acc-entry-cancel')?.addEventListener('click', closeAccEntryModal);
+  document.getElementById('acc-entry-form')?.addEventListener('submit', handleAccEntrySubmit);
+  document.querySelectorAll('input[name="acc-kind"]').forEach(r =>
+    r.addEventListener('change', e => syncAccEntryKind(e.target.value)));
   // Keeping "to" at or after "from" stops the API rejecting a backwards range
   // after the agency has typed the whole entry.
   document.getElementById('diary-from')?.addEventListener('change', e => {

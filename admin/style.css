@@ -2411,3 +2411,29 @@ input:focus, select:focus, textarea:focus {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* Capital / income / expense picker in the Add-to-the-books form. */
+.kind-picker { display: flex; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+
+.kind {
+  flex: 1;
+  min-width: 130px;
+  cursor: pointer;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  transition: all 0.15s ease;
+}
+
+.kind input { display: none; }
+.kind span { font-size: 13px; font-weight: 700; }
+.kind small { font-size: 10.5px; color: var(--text-muted); }
+.kind:hover { border-color: rgba(255, 255, 255, 0.25); }
+
+.kind:has(input:checked) {
+  border-color: var(--accent-red);
+  background: rgba(229, 57, 53, 0.08);
+}

@@ -128,16 +128,54 @@ function signOut() {
   document.getElementById('login-form').reset();
 }
 
+// ─── Sidebar ───────────────────────────────────────────────
+
+const NAV_KEY = 'tripnix_owner_nav';
+
+/// One button drives two behaviours, because a sidebar means different things
+/// on the two sizes: on a wide screen it collapses to give the charts the room,
+/// on a narrow one it slides over as a drawer.
+function toggleSidebar() {
+  const app = document.getElementById('app');
+  if (window.matchMedia('(max-width: 900px)').matches) {
+    const open = document.getElementById('sidebar').classList.toggle('is-open');
+    document.getElementById('sidebar-overlay').classList.toggle('is-on', open);
+    return;
+  }
+  const collapsed = app.classList.toggle('nav-collapsed');
+  // Remembered, so it does not spring back open on every visit.
+  localStorage.setItem(NAV_KEY, collapsed ? 'collapsed' : 'open');
+}
+
+function closeSidebar() {
+  document.getElementById('sidebar')?.classList.remove('is-open');
+  document.getElementById('sidebar-overlay')?.classList.remove('is-on');
+}
+
+function restoreSidebar() {
+  if (localStorage.getItem(NAV_KEY) === 'collapsed') {
+    document.getElementById('app').classList.add('nav-collapsed');
+  }
+}
+
 // ─── Tabs ──────────────────────────────────────────────────
 
+/// The owner's own concerns, not the whole admin portal. Fleet, bookings, the
+/// diary and the subscription are the office's day-to-day work and live in the
+/// admin portal — duplicating them here gave the owner two of everything and
+/// buried the three things this portal exists for.
 const TAB_META = {
-  dashboard: ['Dashboard', 'Everything happening across your fleet'],
-  accounts:  ['Accounts', 'What came in, and what you have paid Tripnix'],
+  dashboard: ['Dashboard', 'How the money and the fleet are going'],
+  accounts:  ['Accounts', 'Capital, income, expenses and how each bus is doing'],
   gps:       ['GPS Tracking', 'Where every bus last reported from'],
   staff:     ['Office Staff', 'Logins for the people who run the office']
 };
 
 function switchTab(tab) {
+  // On a narrow screen the drawer covers the page, so picking a destination
+  // has to put it away again.
+  closeSidebar();
+
   document.querySelectorAll('.nav-item[data-tab]').forEach(b =>
     b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('.tab-page').forEach(p =>
@@ -181,6 +219,7 @@ async function loadDashboard() {
       )
     );
     state.diary = diaries.filter(Boolean);
+    state.vehicles = vehicles;
     renderDashboard(vehicles);
   } catch (err) {
     document.getElementById('fleet-status').innerHTML =
@@ -322,6 +361,32 @@ function renderAccounts() {
   renderRecoveryChart(a);
   renderExpenseBreakdown(a);
   renderEntryList(a);
+
+  // The dashboard shows the same charts, drawn from the same figures — an
+  // owner opening the portal should see how the money is going without having
+  // to go looking for it.
+  renderDashboardMoney(a);
+}
+
+/// The money half of the dashboard. Kept here rather than in renderDashboard()
+/// because it needs the accounts payload, which loads on its own.
+function renderDashboardMoney(a) {
+  const box = document.getElementById('dash-money');
+  if (!box) return;
+
+  box.innerHTML = `
+    ${statTile('📥', money(a.income.total), `In · ${escapeHtml(a.monthLabel)}`)}
+    ${statTile('📤', money(a.expense.total), `Out · ${escapeHtml(a.monthLabel)}`)}
+    ${statTile(a.profit < 0 ? '📉' : '📈', money(a.profit), `Profit · ${a.margin}% margin`)}
+    ${statTile('🏦', a.capital.recoveredPct === null ? '—' : a.capital.recoveredPct + '%', 'Capital earned back')}`;
+
+  const note = document.getElementById('dash-vehicles-note');
+  if (note) note.textContent = a.monthLabel;
+
+  renderInOutChart(a, 'dash-chart-inout');
+  renderTrendChart(a, 'dash-chart-trend');
+  renderVehicleProfitChart(a, 'dash-chart-vehicles');
+  renderRecoveryChart(a, 'dash-chart-recovery');
 }
 
 function renderCapital(a) {
@@ -378,8 +443,9 @@ function shortMoney(n) {
 }
 
 /// Grouped bars: income beside expense, one pair per month.
-function renderInOutChart(a) {
-  const el = document.getElementById('chart-inout');
+function renderInOutChart(a, target = 'chart-inout') {
+  const el = document.getElementById(target);
+  if (!el) return;
   const data = a.series;
   if (!data.length) { el.innerHTML = '<p class="empty">Nothing recorded yet.</p>'; return; }
 
@@ -428,8 +494,9 @@ function renderInOutChart(a) {
 
 /// A single line: what was left each month. One series, so no legend — the
 /// panel title names it.
-function renderTrendChart(a) {
-  const el = document.getElementById('chart-trend');
+function renderTrendChart(a, target = 'chart-trend') {
+  const el = document.getElementById(target);
+  if (!el) return;
   const data = a.series;
   if (data.length < 2) {
     el.innerHTML = `<p class="empty">${data.length ? 'One month so far — a trend needs at least two.' : 'Nothing recorded yet.'}</p>`;
@@ -470,8 +537,9 @@ function renderTrendChart(a) {
 
 /// Horizontal bars, one per bus. Profit has a sign, so the two directions take
 /// the diverging poles and each bar carries its number.
-function renderVehicleProfitChart(a) {
-  const el = document.getElementById('chart-vehicles');
+function renderVehicleProfitChart(a, target = 'chart-vehicles') {
+  const el = document.getElementById(target);
+  if (!el) return;
   const data = a.perVehicle;
   if (!data.length) { el.innerHTML = '<p class="empty">No buses yet.</p>'; return; }
 
@@ -503,8 +571,9 @@ function renderVehicleProfitChart(a) {
 }
 
 /// How far each bus is towards paying for itself, with its performance band.
-function renderRecoveryChart(a) {
-  const el = document.getElementById('chart-recovery');
+function renderRecoveryChart(a, target = 'chart-recovery') {
+  const el = document.getElementById(target);
+  if (!el) return;
   const withCapital = a.perVehicle.filter(v => v.capital > 0);
 
   if (!withCapital.length) {
@@ -921,6 +990,15 @@ document.querySelectorAll('input[name="kind"]').forEach(r =>
   r.addEventListener('change', e => syncEntryKind(e.target.value)));
 document.querySelectorAll('.nav-item[data-tab]').forEach(b =>
   b.addEventListener('click', () => switchTab(b.dataset.tab)));
+document.getElementById('sidebar-toggle').addEventListener('click', toggleSidebar);
+document.getElementById('sidebar-close').addEventListener('click', closeSidebar);
+document.getElementById('sidebar-overlay').addEventListener('click', closeSidebar);
+document.querySelectorAll('[data-goto]').forEach(link =>
+  link.addEventListener('click', e => {
+    e.preventDefault();
+    switchTab(link.dataset.goto);
+  }));
+restoreSidebar();
 
 // The admin portal sits beside this one in production, and on its own dev port
 // when running locally.

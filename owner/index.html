@@ -45,13 +45,16 @@
 
   <!-- Portal -->
   <div class="app-layout hidden" id="app">
-    <aside class="sidebar">
+    <div id="sidebar-overlay" class="sidebar-overlay"></div>
+
+    <aside class="sidebar" id="sidebar">
       <div class="brand">
         <span class="brand-mark">T</span>
         <div class="brand-text">
           <h2>Tripnix</h2>
           <span>Owner Portal</span>
         </div>
+        <button id="sidebar-close" class="sidebar-close" aria-label="Close menu">&times;</button>
       </div>
 
       <div class="agency-block" id="agency-block"></div>
@@ -73,9 +76,14 @@
 
     <main class="main">
       <header class="top-header">
-        <div>
-          <h1 id="page-title">Dashboard</h1>
-          <p id="page-sub">Everything happening across your fleet</p>
+        <div class="header-left">
+          <button id="sidebar-toggle" class="sidebar-toggle" aria-label="Toggle navigation" title="Toggle navigation">
+            <span></span><span></span><span></span>
+          </button>
+          <div>
+            <h1 id="page-title">Dashboard</h1>
+            <p id="page-sub">Everything happening across your fleet</p>
+          </div>
         </div>
         <button class="btn btn-secondary" id="refresh-btn">🔄 Refresh</button>
       </header>
@@ -84,6 +92,35 @@
         <!-- Dashboard -->
         <section id="tab-dashboard" class="tab-page active">
           <div class="stat-row" id="dash-stats"></div>
+
+          <div class="stat-row" id="dash-money"></div>
+
+          <div class="panel-grid">
+            <div class="panel">
+              <div class="panel-head">
+                <h3>Money in and out</h3>
+                <span class="panel-note">Month by month</span>
+              </div>
+              <div class="panel-body"><div id="dash-chart-inout"></div></div>
+            </div>
+
+            <div class="panel">
+              <div class="panel-head">
+                <h3>Profit trend</h3>
+                <span class="panel-note">What was left after expenses</span>
+              </div>
+              <div class="panel-body"><div id="dash-chart-trend"></div></div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Profit by bus</h3>
+              <span class="panel-note" id="dash-vehicles-note"></span>
+              <a class="panel-link" href="#" data-goto="accounts">Full accounts →</a>
+            </div>
+            <div class="panel-body"><div id="dash-chart-vehicles"></div></div>
+          </div>
 
           <div class="panel">
             <div class="panel-head">
@@ -97,6 +134,14 @@
 
           <div class="panel">
             <div class="panel-head">
+              <h3>Is each bus paying for itself?</h3>
+              <span class="panel-note">How much of the purchase price each has earned back</span>
+            </div>
+            <div class="panel-body"><div id="dash-chart-recovery"></div></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
               <h3>Trip statuses in the app</h3>
               <span class="panel-note">What travellers can see. Post these from the admin portal.</span>
             </div>
@@ -105,7 +150,6 @@
             </div>
           </div>
         </section>
-
         <!-- Accounts -->
         <section id="tab-accounts" class="tab-page">
           <div class="toolbar">
