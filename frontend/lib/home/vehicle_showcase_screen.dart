@@ -91,6 +91,24 @@ class _ExploreTabState extends State<_ExploreTab> {
 
   final List<String> _categories = ['All', 'Bus', 'Traveller', 'Car'];
 
+  /// Seat bands travellers actually shop by: a family hiring a car, a group
+  /// filling a traveller, a wedding party taking a full coach. Bounds are
+  /// inclusive; `max` of null is open-ended.
+  /// The bands tile the whole range with no gap and no overlap. The first
+  /// starts at 0, not 1: a record saved without a seat count would otherwise
+  /// belong to no band at all and disappear the moment any size was picked.
+  /// "Over 40" rather than "40+", since 40 itself sits in the band below.
+  static const List<({String label, int min, int? max})> _seatBands = [
+    (label: 'Any size', min: 0, max: null),
+    (label: 'Up to 12', min: 0, max: 12),
+    (label: '13–25', min: 13, max: 25),
+    (label: '26–40', min: 26, max: 40),
+    (label: 'Over 40', min: 41, max: null),
+  ];
+
+  /// Index into [_seatBands]; 0 is "Any size".
+  int _seatBand = 0;
+
   List<AgencyTrip> _trips = [];
   bool _tripsLoading = true;
 
@@ -154,25 +172,48 @@ class _ExploreTabState extends State<_ExploreTab> {
     return names;
   }
 
-  /// Category, agency and search narrow the list. The chosen date deliberately
-  /// does not: a bus busy that day is shown dimmed with the date it next comes
-  /// free, because dropping it made an agency's newly added bus look as though
-  /// it had never been published at all.
+  /// Whether a vehicle seats enough people for band [index], defaulting to the
+  /// one currently chosen.
+  bool _inSeatBand(Vehicle v, [int? index]) {
+    final band = _seatBands[index ?? _seatBand];
+    if (v.capacity < band.min) return false;
+    return band.max == null || v.capacity <= band.max!;
+  }
+
+  /// Category, agency and search — every filter except seats.
+  ///
+  /// Shared so the list and the per-band counts can never disagree about what
+  /// "matching" means; they differ only in which seat band they apply.
+  bool _matchesOtherFilters(Vehicle v) {
+    final matchesCategory =
+        _selectedCategory == 'All' ||
+        v.type.toLowerCase() == _selectedCategory.toLowerCase();
+    final matchesAgency =
+        _selectedAgency == kAllAgencies || v.operatorName == _selectedAgency;
+    final q = _searchQuery.trim().toLowerCase();
+    final matchesSearch =
+        q.isEmpty ||
+        v.name.toLowerCase().contains(q) ||
+        v.operatorName.toLowerCase().contains(q) ||
+        v.description.toLowerCase().contains(q);
+    return matchesCategory && matchesAgency && matchesSearch;
+  }
+
+  /// How many vehicles a seat band would leave, with the *other* filters still
+  /// applied but its own ignored — otherwise every band but the chosen one
+  /// would read zero.
+  int _countForSeatBand(int index) => _allVehicles
+      .where((v) => _matchesOtherFilters(v) && _inSeatBand(v, index))
+      .length;
+
+  /// Category, agency, seats and search narrow the list. The chosen date
+  /// deliberately does not: a bus busy that day is shown dimmed with the date
+  /// it next comes free, because dropping it made an agency's newly added bus
+  /// look as though it had never been published at all.
   List<Vehicle> get _filteredVehicles {
-    final matching = _allVehicles.where((v) {
-      final matchesCategory =
-          _selectedCategory == 'All' ||
-          v.type.toLowerCase() == _selectedCategory.toLowerCase();
-      final matchesAgency =
-          _selectedAgency == kAllAgencies || v.operatorName == _selectedAgency;
-      final q = _searchQuery.trim().toLowerCase();
-      final matchesSearch =
-          q.isEmpty ||
-          v.name.toLowerCase().contains(q) ||
-          v.operatorName.toLowerCase().contains(q) ||
-          v.description.toLowerCase().contains(q);
-      return matchesCategory && matchesAgency && matchesSearch;
-    }).toList();
+    final matching = _allVehicles
+        .where((v) => _matchesOtherFilters(v) && _inSeatBand(v))
+        .toList();
 
     // Bookable on the chosen day leads; the rest follow in the order they come
     // free, so the soonest alternative is the first one a traveller sees.
@@ -450,6 +491,65 @@ class _ExploreTabState extends State<_ExploreTab> {
                 ),
               ),
             ),
+            // How many people the vehicle has to seat. Each band shows how many
+            // vehicles it would leave, so a traveller can see a band is empty
+            // before tapping it and landing on "no vehicles found".
+            SliverToBoxAdapter(
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(_seatBands.length, (i) {
+                      final band = _seatBands[i];
+                      final isSelected = i == _seatBand;
+                      final count = _countForSeatBand(i);
+                      final empty = count == 0 && i != 0;
+
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: ChoiceChip(
+                          label: Text(
+                            i == 0 ? band.label : '${band.label}  ·  $count',
+                          ),
+                          selected: isSelected,
+                          // A band with nothing in it is still tappable, but
+                          // dimmed — hiding it would make the row jump about as
+                          // the other filters change.
+                          onSelected: (_) => setState(() => _seatBand = i),
+                          showCheckmark: false,
+                          avatar: Icon(
+                            Icons.event_seat,
+                            size: 15,
+                            color: isSelected
+                                ? Colors.white
+                                : empty
+                                ? Colors.grey.shade400
+                                : AppColors.red,
+                          ),
+                          labelStyle: TextStyle(
+                            color: isSelected
+                                ? Colors.white
+                                : empty
+                                ? Colors.grey.shade500
+                                : AppColors.black,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12.5,
+                          ),
+                          selectedColor: AppColors.red,
+                          backgroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            side: BorderSide(color: Colors.grey.shade200),
+                          ),
+                        ),
+                      );
+                    }),
+                  ),
+                ),
+              ),
+            ),
             // Subtitle
             SliverToBoxAdapter(
               child: Padding(
@@ -502,7 +602,13 @@ class _ExploreTabState extends State<_ExploreTab> {
             else if (list.isEmpty)
               SliverFillRemaining(
                 hasScrollBody: false,
-                child: _EmptyState(noVehiclesAtAll: _allVehicles.isEmpty),
+                child: _EmptyState(
+                  noVehiclesAtAll: _allVehicles.isEmpty,
+                  seatBandLabel: _seatBand == 0
+                      ? null
+                      : _seatBands[_seatBand].label,
+                  onClearSeats: () => setState(() => _seatBand = 0),
+                ),
               )
             else
               SliverPadding(
@@ -535,11 +641,21 @@ class _ExploreTabState extends State<_ExploreTab> {
 }
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.noVehiclesAtAll});
+  const _EmptyState({
+    required this.noVehiclesAtAll,
+    this.seatBandLabel,
+    this.onClearSeats,
+  });
 
   /// True when no agency has listed anything yet, as opposed to the current
   /// filters simply excluding everything — the two need different advice.
   final bool noVehiclesAtAll;
+
+  /// The seat band in force, when one is. Named in the message and offered as
+  /// the thing to undo, because a size filter is the easiest of the filters to
+  /// set and then forget about.
+  final String? seatBandLabel;
+  final VoidCallback? onClearSeats;
 
   @override
   Widget build(BuildContext context) {
@@ -570,10 +686,28 @@ class _EmptyState extends StatelessWidget {
             Text(
               noVehiclesAtAll
                   ? 'Buses and cars appear here as soon as a travel agency adds them.'
+                  : seatBandLabel != null
+                  ? 'Nothing seats "$seatBandLabel" with your other filters. '
+                        'Try another size, or widen the category and search.'
                   : 'Try adjusting your category tabs or search keywords.',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.grey[600]),
             ),
+            if (seatBandLabel != null && onClearSeats != null) ...[
+              const SizedBox(height: 14),
+              OutlinedButton.icon(
+                onPressed: onClearSeats,
+                icon: const Icon(Icons.event_seat, size: 16),
+                label: const Text('Show any size'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.red,
+                  side: const BorderSide(color: AppColors.red),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
