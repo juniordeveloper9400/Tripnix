@@ -9,8 +9,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/dark.css">
-  <script type="module" crossorigin src="/admin/assets/index-D44a0ElP.js"></script>
-  <link rel="stylesheet" crossorigin href="/admin/assets/index-AtspF9I0.css">
+  <script type="module" crossorigin src="/admin/assets/index-4NqlXeg3.js"></script>
+  <link rel="stylesheet" crossorigin href="/admin/assets/index-otC8ZAyw.css">
 </head>
 <body>
 
@@ -418,6 +418,7 @@
             <div class="panel-header">
               <h3>Money</h3>
               <select id="acc-month" class="month-select"></select>
+              <button class="btn btn-primary btn-sm" id="acc-add-btn">➕ Add entry</button>
             </div>
             <div class="panel-body">
               <div class="dashboard-stats" id="acc-stats"></div>
@@ -787,6 +788,57 @@
         <div class="modal-footer">
           <button type="button" id="modal-cancel-btn" class="btn btn-secondary">Cancel</button>
           <button type="submit" id="modal-save-btn" class="btn btn-primary">Add Vehicle</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Add capital / income / an expense to the books -->
+  <div id="acc-entry-modal" class="modal-backdrop hidden">
+    <div class="modal-card modal-card-narrow">
+      <div class="modal-header">
+        <h3>Add to the books</h3>
+        <button id="acc-entry-close" class="close-btn">&times;</button>
+      </div>
+      <form id="acc-entry-form" class="modal-body">
+        <div class="kind-picker" id="acc-entry-kind">
+          <label class="kind"><input type="radio" name="acc-kind" value="capital" /><span>🏦 Capital</span><small>What a bus cost to buy</small></label>
+          <label class="kind"><input type="radio" name="acc-kind" value="income" checked /><span>📥 Income</span><small>Money received</small></label>
+          <label class="kind"><input type="radio" name="acc-kind" value="expense" /><span>📤 Expense</span><small>Fuel, wages, servicing</small></label>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label for="acc-entry-vehicle">Bus <span id="acc-entry-vehicle-req"></span></label>
+            <select id="acc-entry-vehicle"></select>
+          </div>
+          <div class="form-group flex-1">
+            <label for="acc-entry-category">Category</label>
+            <select id="acc-entry-category"></select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label for="acc-entry-amount">Amount (₹) *</label>
+            <input type="number" id="acc-entry-amount" min="1" step="1" required />
+          </div>
+          <div class="form-group flex-1">
+            <label for="acc-entry-date">Date *</label>
+            <input type="date" id="acc-entry-date" required />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="acc-entry-note">Note</label>
+          <input type="text" id="acc-entry-note" placeholder="Anything worth remembering" />
+        </div>
+
+        <p class="panel-header-note" id="acc-entry-hint" style="line-height:1.6;"></p>
+
+        <div class="modal-footer">
+          <button type="button" id="acc-entry-cancel" class="btn btn-secondary">Cancel</button>
+          <button type="submit" id="acc-entry-save" class="btn btn-primary">Save entry</button>
         </div>
       </form>
     </div>
