@@ -267,6 +267,37 @@ router.get("/fleet-status", async (req, res) => {
   res.json(rows);
 });
 
+// GET /api/trips/agency-diary - Agency-wide diary entries & latest diary trip
+router.get("/agency-diary", async (req, res) => {
+  const { operatorName } = req.query;
+  if (!operatorName) {
+    return res.status(400).json({ error: "operatorName is required" });
+  }
+
+  await refreshVehiclesFromDb();
+  await refreshTripsFromDb();
+
+  const mine = trips
+    .filter(
+      (t) =>
+        t.kind === "diary" &&
+        t.operatorName &&
+        t.operatorName.toLowerCase() === String(operatorName).trim().toLowerCase()
+    )
+    .map(decorate)
+    .sort((a, b) => String(b.departureDate).localeCompare(String(a.departureDate)));
+
+  // Latest diary trip: the most recent entry by departure date
+  const latestTrip = mine.length > 0 ? mine[0] : null;
+
+  res.json({
+    operatorName,
+    totalEntries: mine.length,
+    latestTrip,
+    entries: mine
+  });
+});
+
 // GET /api/trips/:id
 router.get("/:id", async (req, res) => {
   await refreshVehiclesFromDb();
@@ -442,14 +473,14 @@ function clashingEntry(vehicleId, departureDate, arrivalDate, ignoreId) {
   });
 }
 
-// POST /api/trips/diary - an agency writes an order into a bus's diary.
+// POST /api/trips/diary - an agency writes an order into their agency diary.
 //
 // Kept private: it carries the customer's name, phone and fare, so it never
-// reaches the public feed — only the fact that the bus is taken does.
+// reaches the public feed.
 router.post("/diary", async (req, res) => {
   const { operatorName, vehicleId } = req.body;
-  if (!operatorName || !vehicleId) {
-    return res.status(400).json({ error: "operatorName and vehicleId are required" });
+  if (!operatorName) {
+    return res.status(400).json({ error: "operatorName is required" });
   }
 
   const parsed = readDiaryBody(req.body);
@@ -458,26 +489,12 @@ router.post("/diary", async (req, res) => {
   await refreshVehiclesFromDb();
   await refreshTripsFromDb();
 
-  const vehicle = findVehicle(Number(vehicleId));
-  if (!vehicle) return res.status(404).json({ error: "Vehicle not found" });
-  if (
-    vehicle.operatorName.toLowerCase() !== String(operatorName).trim().toLowerCase()
-  ) {
-    return res.status(403).json({ error: "That vehicle belongs to another agency" });
-  }
-
-  const clash = clashingEntry(
-    vehicle.id,
-    parsed.fields.departureDate,
-    parsed.fields.arrivalDate
-  );
-  if (clash) {
-    return res.status(409).json({
-      error:
-        `${vehicle.name} is already taken from ${clash.departureDate} to ${clash.arrivalDate}. ` +
-        "Pick dates that are free, or remove the entry that clashes.",
-      clashesWith: decorate(clash).id
-    });
+  let vehicle = null;
+  if (vehicleId) {
+    vehicle = findVehicle(Number(vehicleId));
+    if (vehicle && vehicle.operatorName.toLowerCase() !== String(operatorName).trim().toLowerCase()) {
+      return res.status(403).json({ error: "That vehicle belongs to another agency" });
+    }
   }
 
   let id;
@@ -491,12 +508,12 @@ router.post("/diary", async (req, res) => {
   const entry = {
     id,
     kind: "diary",
-    operatorName: vehicle.operatorName,
-    vehicleId: vehicle.id,
-    vehicleName: vehicle.name,
-    vehicleNumber: vehicle.vehicleNumber,
-    vehicleType: vehicle.type,
-    imageUrl: (vehicle.imageUrls && vehicle.imageUrls[0]) || "",
+    operatorName: String(operatorName).trim(),
+    vehicleId: vehicle ? vehicle.id : null,
+    vehicleName: vehicle ? vehicle.name : null,
+    vehicleNumber: vehicle ? vehicle.vehicleNumber : null,
+    vehicleType: vehicle ? vehicle.type : null,
+    imageUrl: (vehicle && vehicle.imageUrls && vehicle.imageUrls[0]) || "",
     ...parsed.fields,
     createdAt: new Date().toISOString()
   };
@@ -536,18 +553,20 @@ router.put("/diary/:id", async (req, res) => {
     });
   }
 
-  const clash = clashingEntry(
-    trips[index].vehicleId,
-    parsed.fields.departureDate,
-    parsed.fields.arrivalDate,
-    id
-  );
-  if (clash) {
-    return res.status(409).json({
-      error:
-        `That bus is already taken from ${clash.departureDate} to ${clash.arrivalDate}. ` +
-        "Pick dates that are free."
-    });
+  if (trips[index].vehicleId) {
+    const clash = clashingEntry(
+      trips[index].vehicleId,
+      parsed.fields.departureDate,
+      parsed.fields.arrivalDate,
+      id
+    );
+    if (clash) {
+      return res.status(409).json({
+        error:
+          `That bus is already taken from ${clash.departureDate} to ${clash.arrivalDate}. ` +
+          "Pick dates that are free."
+      });
+    }
   }
 
   trips[index] = { ...trips[index], ...parsed.fields };

@@ -165,6 +165,7 @@ function restoreSidebar() {
 /// buried the three things this portal exists for.
 const TAB_META = {
   dashboard: ['Dashboard', 'How the money and the fleet are going'],
+  diary:     ['Agency Diary', 'Travel orders and schedule for your agency'],
   accounts:  ['Accounts', 'Capital, income, expenses and how each bus is doing'],
   gps:       ['GPS Tracking', 'Where every bus last reported from']
 };
@@ -185,6 +186,7 @@ function switchTab(tab) {
 
   if (tab === 'gps') loadTracking();
   if (tab === 'accounts') loadAccounts();
+  if (tab === 'diary') loadOwnerAgencyDiary();
 }
 
 // ─── Loading ───────────────────────────────────────────────
@@ -193,29 +195,29 @@ async function loadAll() {
   await Promise.allSettled([
     loadDashboard(),
     loadAccounts(),
-    loadTracking()
+    loadTracking(),
+    loadOwnerAgencyDiary()
   ]);
 }
 
 async function loadDashboard() {
   const op = state.user.operatorName;
   try {
-    const [statuses, vehicles] = await Promise.all([
+    const [statuses, vehicles, agencyDiary] = await Promise.all([
       api('/trips/fleet-status'),
-      api(`/vehicles?operatorName=${encodeURIComponent(op)}`)
+      api(`/vehicles?operatorName=${encodeURIComponent(op)}`),
+      api(`/trips/agency-diary?operatorName=${encodeURIComponent(op)}`).catch(() => null)
     ]);
     state.fleetStatus = statuses.filter(s => s.operatorName === op);
-
-    // The owner's read-only picture of each bus: what it is doing today, drawn
-    // from the same diary the office works in.
-    const diaries = await Promise.all(
-      vehicles.map(v =>
-        api(`/vehicles/${v.id}/schedule?operatorName=${encodeURIComponent(op)}`)
-          .catch(() => null)
-      )
-    );
-    state.diary = diaries.filter(Boolean);
     state.vehicles = vehicles;
+    state.agencyDiaryData = agencyDiary;
+
+    // Render Latest Agency Diary Trip card on Dashboard
+    const dashLatestEl = document.getElementById('owner-dash-latest-diary');
+    if (dashLatestEl) {
+      dashLatestEl.innerHTML = renderOwnerLatestTripCard(agencyDiary?.latestTrip);
+    }
+
     renderDashboard(vehicles);
   } catch (err) {
     document.getElementById('fleet-status').innerHTML =
@@ -292,6 +294,115 @@ function statTile(icon, value, label) {
       <span class="stat-icon">${icon}</span>
       <strong>${escapeHtml(value)}</strong>
       <span>${escapeHtml(label)}</span>
+    </div>`;
+}
+
+// ─── Agency Diary ───────────────────────────────────────────
+
+async function loadOwnerAgencyDiary() {
+  const op = state.user?.operatorName;
+  if (!op) return;
+
+  const listEl = document.getElementById('owner-diary-list');
+  if (listEl) listEl.innerHTML = '<p class="empty">Loading agency diary…</p>';
+
+  try {
+    const data = await api(`/trips/agency-diary?operatorName=${encodeURIComponent(op)}`);
+    state.agencyDiaryData = data;
+    renderOwnerDiary();
+  } catch (err) {
+    if (listEl) listEl.innerHTML = `<p class="empty">❌ ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+function renderOwnerDiary() {
+  const data = state.agencyDiaryData;
+  const latest = data?.latestTrip;
+
+  const latestContainer = document.getElementById('owner-diary-latest-container');
+  if (latestContainer) {
+    latestContainer.innerHTML = renderOwnerLatestTripCard(latest);
+  }
+
+  const listEl = document.getElementById('owner-diary-list');
+  if (!listEl) return;
+
+  const entries = data?.entries || [];
+  if (!entries.length) {
+    listEl.innerHTML = '<p class="empty">No orders recorded in your agency diary yet.</p>';
+    return;
+  }
+
+  listEl.innerHTML = entries.map(e => {
+    const statusClass = e.status === 'On Trip' ? 'pill-green'
+      : e.status === 'Completed' ? 'pill-grey' : 'pill-amber';
+
+    const contact = e.customerPhone
+      ? ` · <a href="tel:${escapeHtml(e.customerPhone)}" style="color:#93c5fd;text-decoration:none;">📞 ${escapeHtml(e.customerPhone)}</a>`
+      : '';
+
+    return `
+      <div class="diary-row-item">
+        <div class="row-main">
+          <strong>📕 ${escapeHtml(e.place || 'Agency Order')}</strong>
+          <span class="row-sub">👤 ${escapeHtml(e.customerName || 'Customer')}${contact}${e.note ? ` — 📝 ${escapeHtml(e.note)}` : ''}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:16px;">
+          <div style="text-align:right;">
+            <div style="font-size:13px;font-weight:700;">${formatDate(e.departureDate)} → ${formatDate(e.arrivalDate)}</div>
+            <div style="font-size:12px;color:var(--green);font-weight:800;">${money(e.fare)}</div>
+          </div>
+          <span class="pill ${statusClass}">${escapeHtml(e.status)}</span>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function renderOwnerLatestTripCard(latest) {
+  if (!latest) {
+    return `
+      <div class="latest-diary-card" style="background: rgba(30, 41, 59, 0.6); border-color: rgba(255, 255, 255, 0.1);">
+        <div class="latest-diary-header">
+          <div class="latest-diary-badge" style="color: #94a3b8; background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.1);">
+            🌟 LATEST AGENCY DIARY TRIP
+          </div>
+        </div>
+        <p style="color: var(--muted); margin: 0; font-size: 13.5px;">
+          No agency diary trips recorded yet.
+        </p>
+      </div>`;
+  }
+
+  const statusClass = latest.status === 'On Trip' ? 'pill-green'
+    : latest.status === 'Completed' ? 'pill-grey' : 'pill-amber';
+
+  return `
+    <div class="latest-diary-card">
+      <div class="latest-diary-header">
+        <div class="latest-diary-badge">🌟 LATEST AGENCY DIARY TRIP</div>
+        <span class="pill ${statusClass}">${escapeHtml(latest.status)}</span>
+      </div>
+      <div class="latest-diary-body">
+        <div class="latest-diary-main">
+          <div class="latest-diary-place">📕 ${escapeHtml(latest.place || 'Agency Order')}</div>
+          <div class="latest-diary-customer">
+            👤 <strong>${escapeHtml(latest.customerName || 'Customer')}</strong>
+            ${latest.customerPhone ? ` · <a href="tel:${escapeHtml(latest.customerPhone)}">📞 ${escapeHtml(latest.customerPhone)}</a>` : ''}
+          </div>
+          ${latest.note ? `<div class="latest-diary-note">📝 ${escapeHtml(latest.note)}</div>` : ''}
+        </div>
+        <div class="latest-diary-meta">
+          <div class="latest-diary-dates">
+            <span class="meta-label">SCHEDULED DATES</span>
+            <strong>${formatDate(latest.departureDate)} → ${formatDate(latest.arrivalDate)}</strong>
+            <small>(${latest.durationDays} day${latest.durationDays === 1 ? '' : 's'})</small>
+          </div>
+          <div class="latest-diary-fare">
+            <span class="meta-label">AGREED FARE</span>
+            <strong class="fare-amount">${money(latest.fare)}</strong>
+          </div>
+        </div>
+      </div>
     </div>`;
 }
 

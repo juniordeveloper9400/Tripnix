@@ -2501,3 +2501,119 @@ input:focus, select:focus, textarea:focus {
   color: var(--text-muted);
   font-style: italic;
 }
+
+/* ─── Latest Agency Diary Trip Highlight Card ─────────────── */
+.latest-diary-card {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.12) 0%, rgba(30, 41, 59, 0.95) 100%);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+}
+
+.latest-diary-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.latest-diary-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #fca5a5;
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  padding: 4px 10px;
+  border-radius: 20px;
+}
+
+.latest-diary-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.latest-diary-main {
+  flex: 1;
+  min-width: 250px;
+}
+
+.latest-diary-place {
+  font-size: 18px;
+  font-weight: 700;
+  color: #ffffff;
+  margin-bottom: 8px;
+}
+
+.latest-diary-customer {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.latest-diary-customer strong {
+  color: #ffffff;
+}
+
+.latest-diary-customer a {
+  color: #60a5fa;
+  text-decoration: none;
+}
+
+.latest-diary-note {
+  font-size: 13px;
+  color: #cbd5e1;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  margin-top: 8px;
+  border-left: 3px solid var(--accent-red);
+}
+
+.latest-diary-meta {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  background: rgba(15, 23, 42, 0.6);
+  padding: 12px 18px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.latest-diary-dates, .latest-diary-fare {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.meta-label {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+.latest-diary-dates strong {
+  font-size: 14px;
+  color: #ffffff;
+}
+
+.latest-diary-dates small {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.fare-amount {
+  font-size: 18px;
+  font-weight: 800;
+  color: #4ade80;
+}

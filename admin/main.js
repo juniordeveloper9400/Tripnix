@@ -877,37 +877,40 @@ async function loadData() {
 
 /// The diary shows one bus at a time. With a single bus it opens straight on
 /// it; with several the agency picks, which is the point of the picker.
+// ─── Agency Diary ───────────────────────────────────────────
+
+/// The Agency Diary shows all customer orders and schedule for the travel agency as a whole.
 async function loadDiary() {
   await loadData();
-
-  const fleet = state.vehicles;
-  if (!fleet.length) {
-    state.diaryVehicleId = null;
-    state.diary = null;
-    renderDiary();
-    return;
-  }
-
-  const stillExists = fleet.some(v => v.id === state.diaryVehicleId);
-  if (!stillExists) state.diaryVehicleId = fleet[0].id;
-
-  await loadDiaryFor(state.diaryVehicleId);
-}
-
-async function loadDiaryFor(vehicleId) {
-  state.diaryVehicleId = vehicleId;
-  renderDiaryBusPicker();
-
   const listEl = document.getElementById('diary-list');
-  if (listEl) listEl.innerHTML = '<p class="diary-empty">Loading schedule…</p>';
+  if (listEl) listEl.innerHTML = '<p class="diary-empty">Loading agency diary…</p>';
 
   try {
     const operator = state.currentUser?.operatorName || '';
     const res = await fetch(
-      `${API_BASE}/vehicles/${vehicleId}/schedule?operatorName=${encodeURIComponent(operator)}`
+      `${API_BASE}/trips/agency-diary?operatorName=${encodeURIComponent(operator)}`
     );
-    if (!res.ok) throw new Error('Could not load the schedule');
-    state.diary = await res.json();
+    if (!res.ok) throw new Error('Could not load agency diary');
+    state.agencyDiaryData = await res.json();
+    
+    // Build booked dates set across all agency entries
+    const entries = state.agencyDiaryData?.entries || [];
+    const bookedSet = new Set();
+    entries.forEach(e => {
+      if (e.status === 'Completed' || !e.departureDate || !e.arrivalDate) return;
+      let d = new Date(`${e.departureDate}T00:00:00`);
+      const end = new Date(`${e.arrivalDate}T00:00:00`);
+      while (d <= end) {
+        bookedSet.add(d.toISOString().slice(0, 10));
+        d.setDate(d.getDate() + 1);
+      }
+    });
+
+    state.diary = {
+      entries,
+      latestTrip: state.agencyDiaryData?.latestTrip || null,
+      bookedDates: Array.from(bookedSet)
+    };
   } catch (err) {
     state.diary = null;
     if (listEl) listEl.innerHTML = `<p class="diary-empty">❌ ${escapeHtml(err.message)}</p>`;
@@ -916,45 +919,65 @@ async function loadDiaryFor(vehicleId) {
 
   renderDiary();
 }
-window.loadDiaryFor = loadDiaryFor;
 
 function renderDiary() {
-  renderDiaryBusPicker();
-  renderDiaryHeader();
+  renderLatestDiaryTripCard();
   renderDiaryList();
   renderDiaryCalendar();
 }
 
-function renderDiaryBusPicker() {
-  const box = document.getElementById('diary-bus-picker');
-  if (!box) return;
+function renderLatestDiaryTripCard() {
+  const container = document.getElementById('latest-diary-trip-container');
+  if (!container) return;
 
-  if (!state.vehicles.length) {
-    box.innerHTML = '<p class="diary-empty">Add a bus to your fleet first — its diary appears here.</p>';
+  const latest = state.diary?.latestTrip;
+
+  if (!latest) {
+    container.innerHTML = `
+      <div class="latest-diary-card" style="background: rgba(30, 41, 59, 0.6); border-color: rgba(255, 255, 255, 0.1);">
+        <div class="latest-diary-header">
+          <div class="latest-diary-badge" style="color: #94a3b8; background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.1);">
+            🌟 LATEST AGENCY DIARY TRIP
+          </div>
+        </div>
+        <p style="color: var(--text-muted); margin: 0; font-size: 14px;">
+          No agency diary trips recorded yet. Click <strong>➕ Add Entry</strong> to record your first order.
+        </p>
+      </div>`;
     return;
   }
 
-  box.innerHTML = state.vehicles.map(v => `
-    <button class="diary-bus${v.id === state.diaryVehicleId ? ' is-active' : ''}"
-            onclick="loadDiaryFor(${v.id})">
-      <span class="diary-bus-name">${escapeHtml(v.name)}</span>
-      <span class="diary-bus-number">${escapeHtml(v.vehicleNumber || '—')}</span>
-    </button>`).join('');
-}
+  const statusClass = latest.status === 'On Trip' ? 'confirmed'
+    : latest.status === 'Completed' ? 'cancelled' : 'pending';
 
-function renderDiaryHeader() {
-  const title = document.getElementById('diary-vehicle-title');
-  const sub   = document.getElementById('diary-vehicle-sub');
-  const d = state.diary;
-  if (!title || !sub) return;
-
-  if (!d) {
-    title.textContent = 'Schedule';
-    sub.textContent = '';
-    return;
-  }
-  title.textContent = `${d.vehicleName} · ${d.vehicleNumber || '—'}`;
-  sub.textContent = `${d.vehicleType} · ${d.seats} seats`;
+  container.innerHTML = `
+    <div class="latest-diary-card">
+      <div class="latest-diary-header">
+        <div class="latest-diary-badge">🌟 LATEST AGENCY DIARY TRIP</div>
+        <span class="badge-status ${statusClass}">${escapeHtml(latest.status)}</span>
+      </div>
+      <div class="latest-diary-body">
+        <div class="latest-diary-main">
+          <div class="latest-diary-place">📕 ${escapeHtml(latest.place || 'Agency Order')}</div>
+          <div class="latest-diary-customer">
+            👤 <strong>${escapeHtml(latest.customerName || 'Customer')}</strong>
+            ${latest.customerPhone ? ` · <a href="tel:${escapeHtml(latest.customerPhone)}">📞 ${escapeHtml(latest.customerPhone)}</a>` : ''}
+          </div>
+          ${latest.note ? `<div class="latest-diary-note">📝 ${escapeHtml(latest.note)}</div>` : ''}
+        </div>
+        <div class="latest-diary-meta">
+          <div class="latest-diary-dates">
+            <span class="meta-label">SCHEDULED DATES</span>
+            <strong>${formatDate(latest.departureDate)} → ${formatDate(latest.arrivalDate)}</strong>
+            <small>(${latest.durationDays} day${latest.durationDays === 1 ? '' : 's'})</small>
+          </div>
+          <div class="latest-diary-fare">
+            <span class="meta-label">AGREED FARE</span>
+            <strong class="fare-amount">${money(latest.fare)}</strong>
+          </div>
+        </div>
+      </div>
+    </div>`;
 }
 
 function renderDiaryList() {
@@ -966,20 +989,19 @@ function renderDiaryList() {
   if (!d) { el.innerHTML = ''; if (summary) summary.innerHTML = ''; return; }
 
   const upcoming = d.entries.filter(e => e.status !== 'Completed');
-
   const orders = d.entries.filter(e => e.kind === 'diary');
   const earned = orders.reduce((sum, e) => sum + Number(e.fare || 0), 0);
 
   if (summary) {
     summary.innerHTML = `
-      <div class="diary-stat"><strong>${upcoming.length}</strong><span>Scheduled</span></div>
-      <div class="diary-stat"><strong>${d.bookedDates.length}</strong><span>Days booked</span></div>
-      <div class="diary-stat"><strong>${orders.length}</strong><span>Orders</span></div>
-      <div class="diary-stat"><strong>${money(earned)}</strong><span>Fares booked</span></div>`;
+      <div class="diary-stat"><strong>${upcoming.length}</strong><span>Active / Scheduled</span></div>
+      <div class="diary-stat"><strong>${d.bookedDates.length}</strong><span>Days Booked</span></div>
+      <div class="diary-stat"><strong>${orders.length}</strong><span>Diary Orders</span></div>
+      <div class="diary-stat"><strong>${money(earned)}</strong><span>Total Fares</span></div>`;
   }
 
   if (!d.entries.length) {
-    el.innerHTML = '<p class="diary-empty">Nothing in this bus\'s diary yet. Use ➕ Add Entry to write an order, or tap a free day on the calendar.</p>';
+    el.innerHTML = '<p class="diary-empty">No orders in your agency diary yet. Use ➕ Add Entry to write an order, or tap a date on the calendar.</p>';
     return;
   }
 
@@ -987,9 +1009,6 @@ function renderDiaryList() {
     const statusClass = e.status === 'On Trip' ? 'confirmed'
       : e.status === 'Completed' ? 'cancelled' : 'pending';
 
-    // Three kinds share this list: orders written here by hand, bookings that
-    // came in from the app, and the agency's own public trip statuses. Only the
-    // first is editable — the others are records of something that happened.
     const isOrder = e.kind === 'diary';
     const contact = e.customerPhone
       ? ` · <a href="tel:${escapeHtml(e.customerPhone)}">${escapeHtml(e.customerPhone)}</a>`
@@ -1008,15 +1027,15 @@ function renderDiaryList() {
     }
 
     const label = isOrder
-      ? '📕 ' + escapeHtml(e.place || 'Order')
+      ? '📕 ' + escapeHtml(e.place || 'Agency Order')
       : e.kind === 'booking'
         ? '📑 Customer booking'
         : '🗺️ ' + escapeHtml(e.place || 'Trip');
 
     const actions = isOrder
       ? `<div class="diary-row-actions">
-           <button class="btn btn-secondary btn-sm" onclick="editDiaryEntry(${e.id})">✏️</button>
-           <button class="btn btn-secondary btn-sm" style="color:var(--accent-red);" onclick="deleteDiaryEntry(${e.id})">🗑️</button>
+           <button class="btn btn-secondary btn-sm" onclick="editDiaryEntry(${e.id})">✏️ Edit</button>
+           <button class="btn btn-secondary btn-sm" style="color:var(--accent-red);" onclick="deleteDiaryEntry(${e.id})">🗑️ Delete</button>
          </div>`
       : '';
 
@@ -1039,7 +1058,6 @@ function renderDiaryList() {
   }).join('');
 }
 
-/// A month grid for the current and next month, with taken days marked.
 function renderDiaryCalendar() {
   const el = document.getElementById('diary-calendar');
   if (!el) return;
@@ -1054,16 +1072,11 @@ function renderDiaryCalendar() {
   el.innerHTML = months.map(first => {
     const label = first.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
     const daysInMonth = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
-    // Monday-first grid.
     const lead = (first.getDay() + 6) % 7;
 
-    // What is on each booked day, so hovering a marked square says who has the
-    // bus rather than only that something does.
     const onDate = iso => (d.entries || [])
       .filter(e => e.status !== 'Completed' && iso >= e.departureDate && iso <= e.arrivalDate)
-      .map(e => e.kind === 'diary' || e.kind === 'booking'
-        ? `${e.customerName || 'Booked'}${e.place ? ' — ' + e.place : ''}`
-        : (e.place || 'Trip'))
+      .map(e => `${e.customerName || 'Booked'}${e.place ? ' — ' + e.place : ''}`)
       .join(' | ');
 
     const cells = [];
@@ -1072,7 +1085,6 @@ function renderDiaryCalendar() {
       const iso = `${first.getFullYear()}-${String(first.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
       const taken = booked.has(iso);
       const title = taken ? `${iso} — ${onDate(iso)}` : `${iso} — free, tap to write an order`;
-      // A free day is the quickest way into the form, prefilled with that date.
       cells.push(
         `<span class="diary-day${taken ? ' is-booked' : ''}" title="${escapeHtml(title)}"` +
         `${taken ? '' : ` role="button" onclick="openDiaryModalForDate('${iso}')"`}>${day}</span>`
@@ -1088,31 +1100,22 @@ function renderDiaryCalendar() {
   }).join('');
 }
 
-// ─── Diary entries (the order book) ────────────────────────
+// ─── Agency Diary Entries (Order Book) ─────────────────────
 
-/// Opens the order form. Pass an entry to correct one already written, or a
-/// date to start a new one on that day.
 function openDiaryModal(entry = null, prefillDate = null) {
   const modal = document.getElementById('diary-modal');
   if (!modal) return;
 
-  if (!state.diaryVehicleId) {
-    return alert('❌ Pick a bus first.');
-  }
-
-  const bus = state.vehicles.find(v => v.id === state.diaryVehicleId);
   document.getElementById('diary-modal-title').textContent =
     entry ? 'Edit Diary Entry' : 'New Diary Entry';
-  document.getElementById('diary-modal-bus').textContent = bus
-    ? `📕 ${bus.name} · ${bus.vehicleNumber || '—'}`
-    : '';
+  const modalBus = document.getElementById('diary-modal-bus');
+  if (modalBus) modalBus.textContent = '📕 Agency Travel Order';
 
   document.getElementById('diary-entry-id').value = entry?.id ?? '';
   document.getElementById('diary-customer').value = entry?.customerName ?? '';
   document.getElementById('diary-phone').value    = entry?.customerPhone ?? '';
   document.getElementById('diary-place').value    = entry?.place ?? '';
   document.getElementById('diary-from').value     = entry?.departureDate ?? prefillDate ?? '';
-  // A one-day hire is the common case, so "to" starts on the same day.
   document.getElementById('diary-to').value       = entry?.arrivalDate ?? prefillDate ?? '';
   document.getElementById('diary-fare').value     = entry?.fare ? String(entry.fare) : '';
   document.getElementById('diary-note').value     = entry?.note ?? '';
@@ -1140,12 +1143,12 @@ window.editDiaryEntry = function(id) {
 window.deleteDiaryEntry = async function(id) {
   const entry = (state.diary?.entries || []).find(e => e.id === id);
   if (!entry) return;
-  if (!confirm(`Remove ${entry.customerName || 'this entry'} (${formatDate(entry.departureDate)} → ${formatDate(entry.arrivalDate)}) from the diary?\n\nThe dates go back to free.`)) return;
+  if (!confirm(`Remove ${entry.customerName || 'this entry'} (${formatDate(entry.departureDate)} → ${formatDate(entry.arrivalDate)}) from the agency diary?`)) return;
 
   try {
     const res = await fetch(`${API_BASE}/trips/${id}`, { method: 'DELETE' });
     if (!res.ok) throw new Error('Could not remove this entry');
-    await loadDiaryFor(state.diaryVehicleId);
+    await loadDiary();
   } catch (err) {
     alert('❌ ' + err.message);
   }
@@ -1157,7 +1160,6 @@ async function handleDiarySubmit(e) {
   const id = document.getElementById('diary-entry-id').value;
   const payload = {
     operatorName: state.currentUser?.operatorName,
-    vehicleId: state.diaryVehicleId,
     customerName: document.getElementById('diary-customer').value.trim(),
     customerPhone: document.getElementById('diary-phone').value.trim(),
     place: document.getElementById('diary-place').value.trim(),
@@ -1182,11 +1184,10 @@ async function handleDiarySubmit(e) {
       }
     );
     const data = await res.json().catch(() => null);
-    // 409 is a double-booking: the API names the dates that clash.
     if (!res.ok) throw new Error(data?.error || 'Could not save this entry');
 
     closeDiaryModal();
-    await loadDiaryFor(state.diaryVehicleId);
+    await loadDiary();
   } catch (err) {
     alert('❌ ' + err.message);
   } finally {

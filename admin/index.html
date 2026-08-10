@@ -95,7 +95,7 @@
         </button>
         <button class="nav-item" data-tab="schedule">
           <span class="icon">📆</span>
-          <span class="label">Bus Diary</span>
+          <span class="label">Agency Diary</span>
         </button>
         <button class="nav-item" data-tab="accounts">
           <span class="icon">💰</span>
@@ -370,23 +370,16 @@
         </section>
 
         <!-- TAB 4: Subscription & Plans -->
-        <!-- TAB: Bus Diary — one schedule per vehicle -->
+        <!-- TAB: Agency Diary -->
         <section id="tab-schedule" class="tab-page">
-          <div class="panel-card">
-            <div class="panel-header">
-              <h3>Bus Diary</h3>
-              <span class="panel-header-note">Pick a bus to see everything booked against it</span>
-            </div>
-            <div class="panel-body">
-              <div class="diary-bus-picker" id="diary-bus-picker"></div>
-            </div>
-          </div>
+          <!-- Latest Agency Diary Trip Highlight Banner -->
+          <div id="latest-diary-trip-container"></div>
 
-          <div class="dashboard-panels">
+          <div class="dashboard-panels" style="margin-top: 16px;">
             <div class="panel-card flex-2">
               <div class="panel-header">
-                <h3 id="diary-vehicle-title">Schedule</h3>
-                <span class="panel-header-note" id="diary-vehicle-sub"></span>
+                <h3>Agency Diary Orders</h3>
+                <span class="panel-header-note">All customer travel orders for your agency</span>
                 <button id="diary-add-btn" class="btn btn-primary btn-sm">➕ Add Entry</button>
               </div>
               <div class="panel-body">
@@ -396,15 +389,11 @@
             </div>
 
             <div class="panel-card flex-1">
-              <div class="panel-header"><h3>Booked Dates</h3></div>
+              <div class="panel-header"><h3>Booked Calendar</h3></div>
               <div class="panel-body">
                 <div class="diary-calendar" id="diary-calendar"></div>
                 <p class="diary-legend">
                   <span class="diary-dot is-booked"></span> Booked
-                  <span class="diary-dot is-free"></span> Free
-                </p>
-                <p class="diary-legend" style="margin-top:4px;">
-                  Tap a free day to write an order for it.
                 </p>
               </div>
             </div>

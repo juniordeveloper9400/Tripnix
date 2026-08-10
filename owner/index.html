@@ -61,6 +61,7 @@
 
       <nav class="nav-menu">
         <button class="nav-item active" data-tab="dashboard"><span>📊</span> Dashboard</button>
+        <button class="nav-item" data-tab="diary"><span>📆</span> Agency Diary</button>
         <button class="nav-item" data-tab="accounts"><span>💰</span> Accounts</button>
         <button class="nav-item" data-tab="gps"><span>📍</span> GPS Tracking</button>
       </nav>
@@ -90,6 +91,9 @@
       <div class="content">
         <!-- Dashboard -->
         <section id="tab-dashboard" class="tab-page active">
+          <!-- Latest Agency Diary Trip Highlight Banner -->
+          <div id="owner-dash-latest-diary"></div>
+
           <div class="stat-row" id="dash-stats"></div>
 
           <div class="stat-row" id="dash-money"></div>
@@ -269,6 +273,21 @@
                 ⚠️ This endpoint is open to anyone who knows the vehicle id. Add a
                 per-device key before real buses depend on it.
               </p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Agency Diary -->
+        <section id="tab-diary" class="tab-page">
+          <div id="owner-diary-latest-container"></div>
+
+          <div class="panel" style="margin-top: 16px;">
+            <div class="panel-head">
+              <h3>Agency Diary Orders</h3>
+              <span class="panel-note">All travel orders and bookings recorded across your agency</span>
+            </div>
+            <div class="panel-body">
+              <div id="owner-diary-list"></div>
             </div>
           </div>
         </section>
