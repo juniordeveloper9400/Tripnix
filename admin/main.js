@@ -1,3 +1,5 @@
+import { renderFleetMap } from '../shared/fleet-map.js';
+
 const API_BASE = window.location.origin.includes('3005')
   ? 'http://localhost:3000/api'
   : window.location.origin + '/api';
@@ -477,6 +479,14 @@ async function loadTracking() {
   if (!operatorName) return;
 
   try {
+    // Fetched once and kept: the key does not change between refreshes, and
+    // asking for it on every reload would be a request per map draw.
+    if (state.mapsApiKey === undefined) {
+      const cfgRes = await fetch(`${API_BASE}/tracking/config`).catch(() => null);
+      const cfg = cfgRes?.ok ? await cfgRes.json() : null;
+      state.mapsApiKey = cfg?.mapsApiKey || '';
+    }
+
     const res = await fetch(`${API_BASE}/tracking?operatorName=${encodeURIComponent(operatorName)}`);
     if (!res.ok) throw new Error('Could not load tracking');
     state.tracking = await res.json();
@@ -490,6 +500,14 @@ async function loadTracking() {
 function renderTracking() {
   const t = state.tracking;
   if (!t) return;
+
+  // Same map the owner sees, drawn by the same shared module — the office and
+  // the owner looking at different pictures of the fleet would be worse than
+  // neither having one.
+  renderFleetMap(document.getElementById('gps-map'), t, {
+    noteEl: document.getElementById('gps-map-note'),
+    apiKey: state.mapsApiKey
+  });
 
   document.getElementById('gps-note').textContent =
     `${t.reporting} of ${t.total} reporting · live for ${t.staleAfterMinutes} minutes after the last fix`;

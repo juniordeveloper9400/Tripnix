@@ -1,3 +1,5 @@
+import { renderFleetMap } from '../shared/fleet-map.js';
+
 const API_BASE = window.location.origin.includes('3006')
   ? 'http://localhost:3000/api'
   : window.location.origin + '/api';
@@ -953,6 +955,12 @@ function downloadAllMonths() {
 async function loadTracking() {
   const op = state.user.operatorName;
   try {
+    // Fetched once and kept: the key does not change between refreshes, and
+    // asking for it on every reload would be a request per map draw.
+    if (state.mapsApiKey === undefined) {
+      const cfg = await api('/tracking/config').catch(() => null);
+      state.mapsApiKey = cfg?.mapsApiKey || '';
+    }
     state.tracking = await api(`/tracking?operatorName=${encodeURIComponent(op)}`);
     renderTracking();
   } catch (err) {
@@ -1003,180 +1011,12 @@ function renderTracking() {
       }).join('')
     : '<p class="empty">No buses in the fleet yet.</p>';
 
-  renderTrackingMap(t, 'gps-map', 'gps-map-note');
-  renderTrackingMap(t, 'dash-gps', 'dash-gps-note', { compact: true });
+  renderFleetMap(document.getElementById('gps-map'), t,
+    { noteEl: document.getElementById('gps-map-note'), apiKey: state.mapsApiKey });
+  renderFleetMap(document.getElementById('dash-gps'), t,
+    { noteEl: document.getElementById('dash-gps-note'), compact: true, apiKey: state.mapsApiKey });
 }
 
-/// A self-contained map of where the buses are.
-///
-/// Drawn as SVG rather than with a tile provider: the deployed site's CSP
-/// blocks scripts and images from other hosts, so Google Maps or Leaflet would
-/// render as an empty box. This plots each bus by its coordinates inside the
-/// area the fleet currently covers — no roads, but it answers "are they
-/// together or spread out, and which one is off on its own".
-function renderTrackingMap(t, targetId, noteId, { compact = false } = {}) {
-  const el = document.getElementById(targetId);
-  if (!el) return;
-
-  const note = noteId ? document.getElementById(noteId) : null;
-  const placed = t.vehicles.filter(v => v.location);
-
-  // Unique per target: the dashboard and the GPS tab each draw a map, and two
-  // gradients sharing an id would leave the second referencing the first.
-  const uid = `m${targetId.replace(/[^a-z0-9]/gi, '')}`;
-
-  if (!placed.length) {
-    if (note) note.textContent = t.total ? 'No bus has reported a position yet' : '';
-    // Still drawn as a map, with nothing on it — an empty grey box would read
-    // as a broken component rather than a fleet that has not reported.
-    el.innerHTML = `
-      <div class="map-frame is-empty">
-        <svg viewBox="0 0 100 46" class="map-svg" aria-hidden="true">
-          <defs>
-            <linearGradient id="${uid}-empty" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0" stop-color="#1b2a44"/>
-              <stop offset="1" stop-color="#131f34"/>
-            </linearGradient>
-          </defs>
-          <rect width="100" height="46" fill="url(#${uid}-empty)"/>
-          <g stroke="#ffffff" fill="none" stroke-linecap="round">
-            <path d="M-2,16 H102" stroke-width="1.4" opacity="0.07"/>
-            <path d="M-2,31 H102" stroke-width="1" opacity="0.055"/>
-            <path d="M30,-2 V48" stroke-width="1.4" opacity="0.07"/>
-            <path d="M68,-2 V48" stroke-width="1" opacity="0.055"/>
-          </g>
-          <path d="M-5,34 C 25,29 40,42 62,36 S 90,28 105,32"
-                fill="none" stroke="#2f6fb5" stroke-width="3" opacity="0.22" stroke-linecap="round"/>
-        </svg>
-        <div class="map-empty">
-          <span class="map-empty-icon">📡</span>
-          <strong>Waiting for the first position</strong>
-          <span>
-            ${t.total
-              ? `${t.total} bus${t.total === 1 ? '' : 'es'} on the books, none reporting yet.`
-              : 'No buses in the fleet yet.'}
-            Buses appear here the moment a tracker posts a fix.
-          </span>
-        </div>
-      </div>`;
-    return;
-  }
-
-  // The window is the area the fleet covers, padded so no bus sits on the
-  // edge. A single bus has no span at all, so it gets a fixed one around it —
-  // otherwise the maths divides by zero and every bus lands in the corner.
-  const lats = placed.map(v => v.location.lat);
-  const lngs = placed.map(v => v.location.lng);
-  const span = Math.max(
-    Math.max(...lats) - Math.min(...lats),
-    Math.max(...lngs) - Math.min(...lngs),
-    0.02
-  ) * 1.35;
-  const midLat = (Math.max(...lats) + Math.min(...lats)) / 2;
-  const midLng = (Math.max(...lngs) + Math.min(...lngs)) / 2;
-
-  const W = 100;
-  const H = compact ? 46 : 62;
-  // Latitude increases northwards but SVG y increases downwards, so north has
-  // to be flipped or the map comes out upside down.
-  const x = lng => ((lng - (midLng - span / 2)) / span) * W;
-  const y = lat => H - ((lat - (midLat - span / 2)) / span) * H;
-
-  const kmAcross = (span * 111).toFixed(span * 111 < 10 ? 1 : 0);
-  if (note) {
-    note.textContent =
-      `${t.reporting} of ${t.total} reporting · about ${kmAcross} km across`;
-  }
-
-  // Markers are drawn as pins standing on the point, so the tip marks the
-  // position and the head never covers it.
-  const pins = placed.map(v => {
-    const l = v.location;
-    const live = l.live;
-    // Status colour is backed by the label and the legend, never left to carry
-    // the meaning by itself.
-    const fill = live ? '#0ca30c' : '#fab219';
-    const cx = Math.min(W - 6, Math.max(6, x(l.lng)));
-    const cy = Math.min(H - 8, Math.max(9, y(l.lat)));
-
-    return `
-      <g class="map-bus">
-        ${live ? `
-          <circle cx="${cx}" cy="${cy}" r="3" fill="${fill}" opacity="0.25">
-            <animate attributeName="r" values="2.5;7;2.5" dur="2.6s" repeatCount="indefinite"/>
-            <animate attributeName="opacity" values="0.35;0;0.35" dur="2.6s" repeatCount="indefinite"/>
-          </circle>` : ''}
-        <ellipse cx="${cx}" cy="${cy + 0.6}" rx="2.2" ry="0.8" fill="#000" opacity="0.28"/>
-        <path d="M${cx},${cy} c-2.4,-2.6 -3.4,-4 -3.4,-5.6 a3.4,3.4 0 1 1 6.8,0 c0,1.6 -1,3 -3.4,5.6 z"
-              fill="${fill}" stroke="#0d1526" stroke-width="0.5"/>
-        <circle cx="${cx}" cy="${cy - 5.6}" r="1.25" fill="#0d1526" opacity="0.85"/>
-        <text class="map-label" x="${cx}" y="${cy - 8}" text-anchor="middle">
-          ${escapeHtml(v.vehicleNumber || v.vehicleName)}
-        </text>
-        <title>${escapeHtml(v.vehicleName)} · ${live ? 'live now' : l.ageMinutes + ' min ago'}${
-          l.label ? ' · ' + escapeHtml(l.label) : ''} · ${l.lat.toFixed(4)}, ${l.lng.toFixed(4)}</title>
-      </g>`;
-  }).join('');
-
-  const silent = t.total - placed.length;
-
-  el.innerHTML = `
-    <div class="map-frame">
-      <svg viewBox="0 0 ${W} ${H}" class="map-svg" role="img"
-           aria-label="Map of ${placed.length} reporting bus${placed.length === 1 ? '' : 'es'}">
-        <defs>
-          <linearGradient id="${uid}-land" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0" stop-color="#1b2a44"/>
-            <stop offset="1" stop-color="#131f34"/>
-          </linearGradient>
-          <pattern id="${uid}-blocks" width="9" height="9" patternUnits="userSpaceOnUse">
-            <rect width="9" height="9" fill="none"/>
-            <rect x="1" y="1" width="7" height="7" rx="1" fill="#ffffff" opacity="0.022"/>
-          </pattern>
-        </defs>
-
-        <!-- Ground, city blocks, a river and a park. Illustrative only: the
-             markers carry the real coordinates, the streets are scenery. -->
-        <rect width="${W}" height="${H}" fill="url(#${uid}-land)"/>
-        <rect width="${W}" height="${H}" fill="url(#${uid}-blocks)"/>
-
-        <path d="M-5,${H * 0.72} C ${W * 0.25},${H * 0.62} ${W * 0.4},${H * 0.9} ${W * 0.62},${H * 0.78}
-                 S ${W * 0.9},${H * 0.6} ${W + 5},${H * 0.68}"
-              fill="none" stroke="#2f6fb5" stroke-width="3.4" opacity="0.3" stroke-linecap="round"/>
-        <ellipse cx="${W * 0.19}" cy="${H * 0.26}" rx="9" ry="6" fill="#2f7a4d" opacity="0.18"/>
-
-        <g stroke="#ffffff" stroke-linecap="round" fill="none">
-          <path d="M-2,${H * 0.34} H ${W + 2}" stroke-width="1.5" opacity="0.11"/>
-          <path d="M-2,${H * 0.58} H ${W + 2}" stroke-width="1.1" opacity="0.085"/>
-          <path d="M${W * 0.3},-2 V ${H + 2}" stroke-width="1.5" opacity="0.11"/>
-          <path d="M${W * 0.68},-2 V ${H + 2}" stroke-width="1.1" opacity="0.085"/>
-          <path d="M-2,${H * 0.1} L ${W * 0.45},${H * 0.44} L ${W + 2},${H * 0.3}"
-                stroke-width="0.9" opacity="0.07"/>
-          <path d="M${W * 0.08},${H + 2} L ${W * 0.52},${H * 0.55} L ${W * 0.86},-2"
-                stroke-width="0.8" opacity="0.06"/>
-        </g>
-
-        ${pins}
-
-        <g class="map-compass" transform="translate(${W - 7.5}, 8)">
-          <circle r="4.2" fill="#0d1526" opacity="0.55"/>
-          <path d="M0,-3.1 L1.5,0.6 L0,-0.35 L-1.5,0.6 Z" fill="#e2e8f0"/>
-          <text y="3.4" text-anchor="middle" class="map-compass-n">N</text>
-        </g>
-      </svg>
-
-      <div class="map-scalebar">
-        <span class="map-scalebar-line"></span>
-        <span>~${kmAcross} km</span>
-      </div>
-    </div>
-    <div class="map-legend">
-      <span><i class="dot" style="background:#0ca30c"></i>Live</span>
-      <span><i class="dot" style="background:#fab219"></i>Last seen earlier</span>
-      ${silent ? `<span><i class="dot" style="background:#94a3b8"></i>${silent} not reporting</span>` : ''}
-      <span class="map-disclaimer">Pins are real positions · streets are illustrative</span>
-    </div>`;
-}
 
 // ─── Boot ──────────────────────────────────────────────────
 

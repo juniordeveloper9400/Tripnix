@@ -61,6 +61,22 @@ function withFreshness(fix) {
   };
 }
 
+// GET /api/tracking/config - what the portals need to draw a real map.
+//
+// A Google Maps browser key is public by design: it travels in the page and is
+// protected by HTTP-referrer restrictions set in Google Cloud, not by secrecy.
+// Serving it here keeps it out of the built bundles, so it can be rotated
+// without rebuilding the portals.
+router.get("/config", (req, res) => {
+  const key = process.env.GOOGLE_MAPS_API_KEY || "";
+  res.json({
+    mapsApiKey: key,
+    // The portals fall back to their own drawn map when this is false, so the
+    // GPS view still works before a key is set up.
+    mapsConfigured: Boolean(key)
+  });
+});
+
 // POST /api/tracking/vehicles/:id - a tracker or driver app reports a position.
 //
 // Deliberately open to any device that knows the vehicle id, the same as the

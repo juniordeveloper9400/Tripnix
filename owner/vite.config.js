@@ -7,6 +7,9 @@ export default defineConfig(({ command }) => ({
   base: command === 'build' ? '/owner/' : '/',
   server: {
     port: 3006,
+    // The fleet map is imported from ../shared, outside this app's root, and
+    // the dev server refuses to serve files above it unless told to.
+    fs: { allow: ['..'] },
     proxy: {
       '/api': {
         target: 'http://localhost:3000',
