@@ -9,7 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/dark.css">
-  <script type="module" crossorigin src="/admin/assets/index-IogQ9W34.js"></script>
+  <script type="module" crossorigin src="/admin/assets/index-fxQhI4th.js"></script>
   <link rel="stylesheet" crossorigin href="/admin/assets/index-DgsWnJBJ.css">
 </head>
 <body>
@@ -433,6 +433,14 @@
 
         <!-- TAB: GPS — last reported position per bus -->
         <section id="tab-gps" class="tab-page">
+          <div class="panel-card">
+            <div class="panel-header">
+              <h3>Where the buses are</h3>
+              <span class="panel-header-note" id="gps-map-note"></span>
+            </div>
+            <div class="panel-body"><div id="gps-map"></div></div>
+          </div>
+
           <div class="panel-card">
             <div class="panel-header">
               <h3>Live positions</h3>
