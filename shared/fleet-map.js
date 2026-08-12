@@ -4,38 +4,19 @@
 // the fleet differently — the same positions rendered two ways is worse than no
 // map at all.
 //
-// Real Google Maps when GOOGLE_MAPS_API_KEY is configured; otherwise a drawn
-// stand-in so the GPS view still works before a key exists. The two share the
-// same markers, tooltips and legend, so switching a key on changes the map
+// Real Google Maps when GOOGLE_MAPS_API_KEY is configured; otherwise Leaflet
+// over OpenStreetMap tiles, which needs no credentials. Both are day maps and
+// share the same markers, popups and legend, so adding a key changes the tiles
 // under the fleet and nothing else.
 
 const STYLE_ID = 'tripnix-fleet-map-styles';
-
-/// Dark tiles, so the map belongs to the portals rather than glaring white in
-/// the middle of them.
-const DARK_STYLE = [
-  { elementType: 'geometry', stylers: [{ color: '#1c2c48' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#0b1220' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#94a3b8' }] },
-  { featureType: 'administrative', elementType: 'geometry', stylers: [{ color: '#4b5563' }] },
-  { featureType: 'poi', elementType: 'labels.text.fill', stylers: [{ color: '#7f8ea3' }] },
-  { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#1f3d2b' }] },
-  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#2a3a55' }] },
-  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#16233a' }] },
-  { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#9ca8bb' }] },
-  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#4a5b78' }] },
-  { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#111c30' }] },
-  { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#243248' }] },
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#132b47' }] },
-  { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#4f6a8a' }] }
-];
 
 /// Loads Leaflet once per page — the keyless path to a real, interactive map
 /// with a marker per bus.
 ///
 /// Google's keyless embed can only ever show one place at a time and takes no
 /// custom markers, so a fleet had to be stepped through one bus at a time.
-/// Leaflet over CARTO's dark basemap puts every bus on one map with no
+/// Leaflet over CARTO's day basemap puts every bus on one map with no
 /// credentials at all, which is what a fleet view is for.
 let leafletLoader = null;
 
@@ -99,15 +80,6 @@ async function renderLeafletMap(container, t, placed, { noteEl, compact, sample 
     container.innerHTML = `
       <div class="fmap fmap-live${compact ? ' is-compact' : ''}">
         <div class="fmap-canvas"></div>
-        ${sample ? `
-          <div class="fmap-banner is-sample">
-            <span>🧭</span>
-            <div>
-              <strong>Sample positions — no tracker connected</strong>
-              <span>This is how tracking will look. These are not where your buses
-                    are; real positions replace them the moment a tracker posts a fix.</span>
-            </div>
-          </div>` : ''}
       </div>
       <div class="fmap-legend"></div>`;
 
@@ -118,10 +90,16 @@ async function renderLeafletMap(container, t, placed, { noteEl, compact, sample 
       // otherwise scrolling past a dashboard traps the pointer in it.
       scrollWheelZoom: false
     });
+
+    // Drops Leaflet's own "Leaflet" credit, which the library adds by default
+    // and its BSD licence does not require. The OpenStreetMap and CARTO credit
+    // stays: that one is a condition of using their data and tiles.
+    map.attributionControl.setPrefix(false);
+
     map.on('click', () => map.scrollWheelZoom.enable());
     map.on('mouseout', () => map.scrollWheelZoom.disable());
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
       maxZoom: 19,
       attribution: '&copy; OpenStreetMap &copy; CARTO'
     }).addTo(map);
@@ -200,6 +178,79 @@ async function renderLeafletMap(container, t, placed, { noteEl, compact, sample 
       : `${t.reporting} of ${t.total} reporting`;
   }
 
+  return true;
+}
+
+/// The fleet as it should be shown: real positions when any exist, sample spots
+/// otherwise.
+///
+/// Exported so the map and the list beside it work from one decision. Deciding
+/// separately is how a list ends up saying "no signal" next to a map showing
+/// the bus somewhere.
+export function fleetForDisplay(tracking) {
+  const vehicles = tracking?.vehicles || [];
+  const positioned = vehicles.filter(v => v.location);
+  if (positioned.length) return { vehicles, sample: false };
+  if (!vehicles.length) return { vehicles, sample: false };
+  return { vehicles: sampleFleet(vehicles), sample: true };
+}
+
+/// One bus on its own small map, for a row in the positions list.
+///
+/// Its own Leaflet instance rather than a shared one: each row is centred on a
+/// different bus, which one map cannot be at once.
+export async function renderBusMiniMap(container, vehicle, { sample = false } = {}) {
+  if (!container) return false;
+  ensureStyles();
+
+  const l = vehicle?.location;
+  if (!l) {
+    container.innerHTML = `<div class="fmap-mini is-empty"><span>No position yet</span></div>`;
+    return false;
+  }
+
+  let L;
+  try {
+    L = await loadLeaflet();
+  } catch {
+    container.innerHTML = `<div class="fmap-mini is-empty"><span>Map unavailable</span></div>`;
+    return false;
+  }
+
+  const existing = liveMaps.get(container);
+  if (existing) {
+    existing.marker.setLatLng([l.lat, l.lng]);
+    existing.map.setView([l.lat, l.lng], existing.map.getZoom());
+    setTimeout(() => existing.map.invalidateSize(), 50);
+    return true;
+  }
+
+  container.innerHTML = `<div class="fmap-mini"><div class="fmap-mini-canvas"></div></div>`;
+
+  const map = L.map(container.querySelector('.fmap-mini-canvas'), {
+    zoomControl: false,
+    attributionControl: false,
+    // A thumbnail is for glancing at, not driving — every interaction is off so
+    // it cannot swallow a scroll or drag meant for the page.
+    dragging: false,
+    scrollWheelZoom: false,
+    doubleClickZoom: false,
+    boxZoom: false,
+    keyboard: false,
+    touchZoom: false
+  }).setView([l.lat, l.lng], 11);
+
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    maxZoom: 19
+  }).addTo(map);
+
+  const marker = L.marker([l.lat, l.lng], {
+    icon: busDivIcon(L, vehicle, l.live ? '#0ca30c' : '#fab219', sample),
+    interactive: false
+  }).addTo(map);
+
+  liveMaps.set(container, { map, marker });
+  setTimeout(() => map.invalidateSize(), 50);
   return true;
 }
 
@@ -321,7 +372,7 @@ function ensureStyles() {
 
     /* Google Maps needs a laid-out box with a real height — given none it
        renders as a zero-height strip and looks broken. */
-    .fmap-live .fmap-canvas { width: 100%; height: 420px; background: #1c2c48; }
+    .fmap-live .fmap-canvas { width: 100%; height: 420px; background: #eef1f5; }
     .fmap-live.is-compact .fmap-canvas { height: 260px; }
     @media (max-width: 620px) {
       .fmap-live .fmap-canvas { height: 300px; }
@@ -364,27 +415,50 @@ function ensureStyles() {
     .fmap-pin-wrap { background: none !important; border: 0 !important; }
     .fmap-pin { display: flex; flex-direction: column; align-items: center; gap: 1px; }
     .fmap-pin img { display: block; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5)); }
+    /* White chip on the day tiles: a dark one sat on light streets like a hole
+       punched in the map. */
     .fmap-pin span {
-      font-size: 10px; font-weight: 800; color: #f8fafc; white-space: nowrap;
-      background: rgba(9,15,28,0.85); padding: 1px 6px; border-radius: 20px;
-      border: 1px solid rgba(255,255,255,0.16);
+      font-size: 10px; font-weight: 800; color: #0f172a; white-space: nowrap;
+      background: rgba(255,255,255,0.94); padding: 1px 6px; border-radius: 20px;
+      border: 1px solid rgba(15,23,42,0.18);
+      box-shadow: 0 1px 3px rgba(15,23,42,0.25);
     }
     .fmap-pin.is-sample img { opacity: 0.9; }
 
-    /* Leaflet's own chrome, toned to the portals. */
-    .fmap-live .leaflet-container { background: #0b1220; font-family: inherit; }
+    /* A thumbnail beside each row in the positions list. */
+    .fmap-mini {
+      width: 190px; height: 108px; border-radius: 10px; overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.14); background: #eef1f5; flex-shrink: 0;
+    }
+    .fmap-mini-canvas { width: 100%; height: 100%; }
+    .fmap-mini .leaflet-container { background: #eef1f5; }
+    .fmap-mini.is-empty { display: flex; align-items: center; justify-content: center; }
+    .fmap-mini.is-empty span { font-size: 10.5px; color: #64748b; }
+    /* The number under the pin is unreadable at thumbnail scale. */
+    .fmap-mini .fmap-pin span { display: none; }
+    .fmap-mini .fmap-pin img { width: 26px; height: 33px; }
+    @media (max-width: 620px) { .fmap-mini { width: 100%; height: 130px; } }
+
+    /* Leaflet's chrome, on a day map. Dark controls on light tiles would read
+       as a rendering fault, so every piece follows the map rather than the
+       portal around it. */
+    .fmap-live .leaflet-container { background: #eef1f5; font-family: inherit; }
+    /* OpenStreetMap and CARTO require attribution, so it stays — muted grey on
+       the light tiles rather than a bright blue link. */
     .fmap-live .leaflet-control-attribution {
-      background: rgba(9,15,28,0.8); color: #94a3b8; font-size: 9.5px;
+      background: rgba(255,255,255,0.72); color: #64748b; font-size: 8.5px;
+      padding: 0 5px; line-height: 1.5;
     }
-    .fmap-live .leaflet-control-attribution a { color: #93c5fd; }
+    .fmap-live .leaflet-control-attribution a { color: #64748b; text-decoration: none; }
+    .fmap-live .leaflet-control-attribution a:hover { color: #334155; }
     .fmap-live .leaflet-popup-content-wrapper,
-    .fmap-live .leaflet-popup-tip { background: #1c2c48; color: #e2e8f0; }
+    .fmap-live .leaflet-popup-tip { background: #ffffff; color: #0f172a; }
     .fmap-live .leaflet-popup-content { font-size: 12px; line-height: 1.5; margin: 10px 12px; }
-    .fmap-live .leaflet-popup-content small { color: #94a3b8; }
+    .fmap-live .leaflet-popup-content small { color: #64748b; }
     .fmap-live .leaflet-bar a {
-      background: #1c2c48; color: #e2e8f0; border-bottom-color: rgba(255,255,255,0.14);
+      background: #ffffff; color: #1f2937; border-bottom-color: rgba(15,23,42,0.14);
     }
-    .fmap-live .leaflet-bar a:hover { background: #263a5c; }
+    .fmap-live .leaflet-bar a:hover { background: #eef1f5; }
 
     /* Sits along the bottom rather than over the middle, so the map stays
        usable — an operator can pan to their routes while waiting. */
@@ -577,12 +651,11 @@ async function renderGoogleMap(container, t, placed, { noteEl, compact, apiKey }
       map: new maps.Map(canvas, {
         center: { lat: placed[0].location.lat, lng: placed[0].location.lng },
         zoom: 12,
-        styles: DARK_STYLE,
         mapTypeControl: !compact,
         streetViewControl: false,
         fullscreenControl: !compact,
         zoomControl: true,
-        backgroundColor: '#1c2c48',
+        backgroundColor: '#eef1f5',
         gestureHandling: 'cooperative'
       }),
       markers: new Map(),

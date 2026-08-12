@@ -548,3 +548,18 @@ code {
 .diary-row-item:last-child {
   margin-bottom: 0;
 }
+
+/* ─── A bus row with its own map ──────────────────────────── */
+
+.row-with-map {
+  align-items: center;
+  gap: 16px;
+}
+
+.row-with-map .row-main { flex: 1; }
+.row-with-map .row-main .row-right { margin-top: 6px; }
+
+@media (max-width: 620px) {
+  .row-with-map { flex-direction: column; align-items: stretch; }
+  .row-with-map .row-map { width: 100%; }
+}

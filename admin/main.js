@@ -1,4 +1,4 @@
-import { renderFleetMap } from '../shared/fleet-map.js';
+import { renderFleetMap, renderBusMiniMap, fleetForDisplay } from '../shared/fleet-map.js';
 
 const API_BASE = window.location.origin.includes('3005')
   ? 'http://localhost:3000/api'
@@ -501,6 +501,10 @@ function renderTracking() {
   const t = state.tracking;
   if (!t) return;
 
+  // One decision for the map and the list, so they can never disagree about
+  // whether these are real fixes or the sample preview.
+  const { vehicles, sample } = fleetForDisplay(t);
+
   // Same map the owner sees, drawn by the same shared module — the office and
   // the owner looking at different pictures of the fleet would be worse than
   // neither having one.
@@ -509,43 +513,52 @@ function renderTracking() {
     apiKey: state.mapsApiKey
   });
 
-  document.getElementById('gps-note').textContent =
-    `${t.reporting} of ${t.total} reporting · live for ${t.staleAfterMinutes} minutes after the last fix`;
+  document.getElementById('gps-note').textContent = sample
+    ? `Sample positions · live for ${t.staleAfterMinutes} minutes after the last fix`
+    : `${t.reporting} of ${t.total} reporting · live for ${t.staleAfterMinutes} minutes after the last fix`;
 
-  document.getElementById('gps-endpoint').textContent =
-    `POST ${API_BASE}/tracking/vehicles/<vehicleId>\n` +
-    `Content-Type: application/json\n\n` +
-    `{ "lat": 9.9312, "lng": 76.2673, "speedKph": 42, "label": "Kochi" }`;
-
-  document.getElementById('gps-list').innerHTML = t.vehicles.length
-    ? t.vehicles.map(v => {
+  document.getElementById('gps-list').innerHTML = vehicles.length
+    ? vehicles.map(v => {
         const l = v.location;
-        const badge = !l
-          ? '<span class="badge-status pending">NO SIGNAL</span>'
-          : l.live
-            ? '<span class="badge-status confirmed">LIVE</span>'
-            : `<span class="badge-status cancelled">${l.ageMinutes} MIN AGO</span>`;
+        const badge = sample
+          ? '<span class="badge-status cancelled">SAMPLE</span>'
+          : !l
+            ? '<span class="badge-status pending">NO SIGNAL</span>'
+            : l.live
+              ? '<span class="badge-status confirmed">LIVE</span>'
+              : `<span class="badge-status cancelled">${l.ageMinutes} MIN AGO</span>`;
 
         const where = !l
           ? 'This bus has never reported a position'
           : `${l.label ? escapeHtml(l.label) + ' · ' : ''}${l.lat.toFixed(5)}, ${l.lng.toFixed(5)}` +
             `${l.speedKph ? ' · ' + Math.round(l.speedKph) + ' km/h' : ''}`;
 
-        const map = l
+        const link = l
           ? ` · <a href="https://www.google.com/maps?q=${l.lat},${l.lng}" target="_blank" rel="noopener">Open map ↗</a>`
           : '';
 
         return `
-          <div class="diary-row">
+          <div class="diary-row gps-row">
             <div class="diary-row-main">
               <strong>${escapeHtml(v.vehicleName)}</strong>
               <code class="vehicle-number">${escapeHtml(v.vehicleNumber || '—')}</code>
-              <div class="diary-row-who">${where}${map}</div>
+              <div class="diary-row-who">${where}${link}</div>
+              <div class="diary-row-status">${badge}</div>
             </div>
-            <div class="diary-row-status">${badge}</div>
+            <div class="row-map" data-bus-map="${v.vehicleId}"></div>
           </div>`;
       }).join('')
     : '<p class="diary-empty">No buses in the fleet yet.</p>';
+
+  // Each row gets its own small map of that bus alone — one map cannot be
+  // centred on three buses at once.
+  for (const v of vehicles) {
+    renderBusMiniMap(
+      document.querySelector(`[data-bus-map="${v.vehicleId}"]`),
+      v,
+      { sample }
+    );
+  }
 }
 
 // ─── Event Listeners ───────────────────────────────────────

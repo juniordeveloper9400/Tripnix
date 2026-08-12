@@ -1,4 +1,4 @@
-import { renderFleetMap } from '../shared/fleet-map.js';
+import { renderFleetMap, renderBusMiniMap, fleetForDisplay } from '../shared/fleet-map.js';
 
 const API_BASE = window.location.origin.includes('3006')
   ? 'http://localhost:3000/api'
@@ -973,43 +973,56 @@ function renderTracking() {
   const t = state.tracking;
   if (!t) return;
 
-  document.getElementById('gps-note').textContent =
-    `${t.reporting} of ${t.total} reporting · a bus counts as live for ${t.staleAfterMinutes} minutes after its last fix`;
+  // One decision for the map and the list, so they can never disagree about
+  // whether these are real fixes or the sample preview.
+  const { vehicles, sample } = fleetForDisplay(t);
 
-  document.getElementById('gps-endpoint').textContent =
-    `POST ${API_BASE}/tracking/vehicles/<vehicleId>\n` +
-    `Content-Type: application/json\n\n` +
-    `{ "lat": 9.9312, "lng": 76.2673, "speedKph": 42, "label": "Kochi" }`;
+  document.getElementById('gps-note').textContent = sample
+    ? `Sample positions · a bus counts as live for ${t.staleAfterMinutes} minutes after its last fix`
+    : `${t.reporting} of ${t.total} reporting · a bus counts as live for ${t.staleAfterMinutes} minutes after its last fix`;
 
-  document.getElementById('gps-list').innerHTML = t.vehicles.length
-    ? t.vehicles.map(v => {
+  document.getElementById('gps-list').innerHTML = vehicles.length
+    ? vehicles.map(v => {
         const l = v.location;
-        const pill = !l
-          ? '<span class="pill pill-grey">NO SIGNAL</span>'
-          : l.live
-            ? '<span class="pill pill-green">LIVE</span>'
-            : `<span class="pill pill-amber">${l.ageMinutes} MIN AGO</span>`;
+        const pill = sample
+          ? '<span class="pill pill-amber">SAMPLE</span>'
+          : !l
+            ? '<span class="pill pill-grey">NO SIGNAL</span>'
+            : l.live
+              ? '<span class="pill pill-green">LIVE</span>'
+              : `<span class="pill pill-amber">${l.ageMinutes} MIN AGO</span>`;
 
         const where = !l
           ? 'This bus has never reported a position'
           : `${l.label ? escapeHtml(l.label) + ' · ' : ''}${l.lat.toFixed(5)}, ${l.lng.toFixed(5)}` +
             `${l.speedKph ? ' · ' + Math.round(l.speedKph) + ' km/h' : ''}`;
 
-        const map = l
+        const link = l
           ? `<a class="map-link" href="https://www.google.com/maps?q=${l.lat},${l.lng}" target="_blank" rel="noopener">Open map ↗</a>`
           : '';
 
         return `
-          <div class="row">
+          <div class="row row-with-map">
             <div class="row-main">
               <strong>${escapeHtml(v.vehicleName)}</strong>
               <code>${escapeHtml(v.vehicleNumber || '—')}</code>
               <span class="row-sub">${where}</span>
+              <div class="row-right">${pill}${link}</div>
             </div>
-            <div class="row-right">${pill}${map}</div>
+            <div class="row-map" data-bus-map="${v.vehicleId}"></div>
           </div>`;
       }).join('')
     : '<p class="empty">No buses in the fleet yet.</p>';
+
+  // Each row gets its own small map of that bus alone — one map cannot be
+  // centred on three buses at once.
+  for (const v of vehicles) {
+    renderBusMiniMap(
+      document.querySelector(`[data-bus-map="${v.vehicleId}"]`),
+      v,
+      { sample }
+    );
+  }
 
   renderFleetMap(document.getElementById('gps-map'), t,
     { noteEl: document.getElementById('gps-map-note'), apiKey: state.mapsApiKey });

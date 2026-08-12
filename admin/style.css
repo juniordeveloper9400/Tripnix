@@ -2658,3 +2658,19 @@ input:focus, select:focus, textarea:focus {
   padding-left: 12px;
   border-left: 1px solid var(--border-color);
 }
+
+/* ─── A bus row with its own map ──────────────────────────── */
+
+.gps-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.gps-row .diary-row-main { flex: 1; min-width: 0; }
+.gps-row .diary-row-status { margin-top: 6px; }
+
+@media (max-width: 620px) {
+  .gps-row { flex-direction: column; align-items: stretch; }
+  .gps-row .row-map { width: 100%; }
+}
