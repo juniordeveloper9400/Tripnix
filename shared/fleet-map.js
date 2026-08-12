@@ -30,6 +30,179 @@ const DARK_STYLE = [
   { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#4f6a8a' }] }
 ];
 
+/// Loads Leaflet once per page — the keyless path to a real, interactive map
+/// with a marker per bus.
+///
+/// Google's keyless embed can only ever show one place at a time and takes no
+/// custom markers, so a fleet had to be stepped through one bus at a time.
+/// Leaflet over CARTO's dark basemap puts every bus on one map with no
+/// credentials at all, which is what a fleet view is for.
+let leafletLoader = null;
+
+function loadLeaflet() {
+  if (window.L?.map) return Promise.resolve(window.L);
+  if (leafletLoader) return leafletLoader;
+
+  leafletLoader = new Promise((resolve, reject) => {
+    if (!document.getElementById('leaflet-css')) {
+      const css = document.createElement('link');
+      css.id = 'leaflet-css';
+      css.rel = 'stylesheet';
+      css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      document.head.appendChild(css);
+    }
+
+    const script = document.createElement('script');
+    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    script.async = true;
+    script.onload = () =>
+      window.L?.map ? resolve(window.L) : reject(new Error('Leaflet loaded but unavailable'));
+    script.onerror = () => reject(new Error('Could not load the map library'));
+    document.head.appendChild(script);
+  }).catch(err => {
+    leafletLoader = null;
+    throw err;
+  });
+
+  return leafletLoader;
+}
+
+/// The marker: a bus badge with the vehicle number under it, so every bus on
+/// the map is identifiable without clicking it.
+function busDivIcon(L, v, colour, sample) {
+  return L.divIcon({
+    className: 'fmap-pin-wrap',
+    iconSize: [40, 52],
+    iconAnchor: [20, 46],
+    popupAnchor: [0, -44],
+    html: `
+      <div class="fmap-pin${sample ? ' is-sample' : ''}">
+        <img src="${busIcon(colour)}" alt="" width="34" height="43">
+        <span>${esc(v.vehicleNumber || v.vehicleName)}</span>
+      </div>`
+  });
+}
+
+/// Draws the fleet on Leaflet — every bus marked, no API key.
+async function renderLeafletMap(container, t, placed, { noteEl, compact, sample }) {
+  let L;
+  try {
+    L = await loadLeaflet();
+  } catch (err) {
+    console.warn('[fleet-map]', err.message);
+    return false;
+  }
+
+  let live = liveMaps.get(container);
+
+  if (!live || !container.querySelector('.fmap-canvas')) {
+    container.innerHTML = `
+      <div class="fmap fmap-live${compact ? ' is-compact' : ''}">
+        <div class="fmap-canvas"></div>
+        ${sample ? `
+          <div class="fmap-banner is-sample">
+            <span>🧭</span>
+            <div>
+              <strong>Sample positions — no tracker connected</strong>
+              <span>This is how tracking will look. These are not where your buses
+                    are; real positions replace them the moment a tracker posts a fix.</span>
+            </div>
+          </div>` : ''}
+      </div>
+      <div class="fmap-legend"></div>`;
+
+    const map = L.map(container.querySelector('.fmap-canvas'), {
+      zoomControl: true,
+      attributionControl: true,
+      // Scroll should move the page, not the map, until the map is clicked —
+      // otherwise scrolling past a dashboard traps the pointer in it.
+      scrollWheelZoom: false
+    });
+    map.on('click', () => map.scrollWheelZoom.enable());
+    map.on('mouseout', () => map.scrollWheelZoom.disable());
+
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap &copy; CARTO'
+    }).addTo(map);
+
+    live = { map, markers: new Map(), L };
+    liveMaps.set(container, live);
+  }
+
+  const seen = new Set();
+  const bounds = [];
+
+  for (const v of placed) {
+    const l = v.location;
+    const colour = l.live ? '#0ca30c' : '#fab219';
+    seen.add(v.vehicleId);
+    bounds.push([l.lat, l.lng]);
+
+    const popup = `
+      <strong>${esc(v.vehicleName)}</strong><br>
+      ${esc(v.vehicleNumber || '')} · ${l.live ? 'Live now' : l.ageMinutes + ' min ago'}<br>
+      ${l.label ? esc(l.label) + '<br>' : ''}
+      ${l.speedKph ? Math.round(l.speedKph) + ' km/h<br>' : ''}
+      <small>${l.lat.toFixed(5)}, ${l.lng.toFixed(5)}</small>
+      ${sample ? '<br><em>Sample position</em>' : ''}`;
+
+    let marker = live.markers.get(v.vehicleId);
+    if (marker) {
+      // Moved rather than rebuilt, so a bus that reports again slides across
+      // instead of the whole layer blinking.
+      marker.setLatLng([l.lat, l.lng]);
+      marker.setIcon(busDivIcon(live.L, v, colour, sample));
+      marker.setPopupContent(popup);
+    } else {
+      marker = live.L
+        .marker([l.lat, l.lng], { icon: busDivIcon(live.L, v, colour, sample) })
+        .addTo(live.map)
+        .bindPopup(popup);
+      live.markers.set(v.vehicleId, marker);
+    }
+  }
+
+  for (const [id, marker] of live.markers) {
+    if (!seen.has(id)) {
+      marker.remove();
+      live.markers.delete(id);
+    }
+  }
+
+  // Framed once. Refitting on every refresh would yank the view back while
+  // someone is panning around it.
+  if (!live.framed && bounds.length) {
+    if (bounds.length === 1) {
+      live.map.setView(bounds[0], 12);
+    } else {
+      live.map.fitBounds(bounds, { padding: compact ? [30, 30] : [55, 55] });
+    }
+    live.framed = true;
+  }
+
+  // Leaflet measures its container on creation; inside a tab that was hidden
+  // then it comes out zero-sized and only paints one grey tile.
+  setTimeout(() => live.map.invalidateSize(), 60);
+
+  const silent = t.total - placed.length;
+  container.querySelector('.fmap-legend').innerHTML = sample
+    ? `<span><i style="background:#fab219"></i>Sample data</span>
+       <span class="fmap-note">Tap a bus for its detail</span>`
+    : `<span><i style="background:#0ca30c"></i>Live</span>
+       <span><i style="background:#fab219"></i>Last seen earlier</span>
+       ${silent ? `<span><i style="background:#94a3b8"></i>${silent} not reporting</span>` : ''}
+       <span class="fmap-note">Tap a bus for its detail</span>`;
+
+  if (noteEl) {
+    noteEl.textContent = sample
+      ? `Sample positions · ${placed.length} bus${placed.length === 1 ? '' : 'es'} shown`
+      : `${t.reporting} of ${t.total} reporting`;
+  }
+
+  return true;
+}
+
 /// Loads the Maps JavaScript API once per page, however many maps ask for it.
 ///
 /// Concurrent callers share one promise — the dashboard and the GPS tab both
@@ -185,6 +358,33 @@ function ensureStyles() {
 
     .fmap-open { margin-left: auto; color: #93c5fd; text-decoration: none; }
     .fmap-open:hover { text-decoration: underline; }
+
+    /* Every bus marked at once: the badge with its number under it, so the map
+       is readable without clicking each one. */
+    .fmap-pin-wrap { background: none !important; border: 0 !important; }
+    .fmap-pin { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+    .fmap-pin img { display: block; filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5)); }
+    .fmap-pin span {
+      font-size: 10px; font-weight: 800; color: #f8fafc; white-space: nowrap;
+      background: rgba(9,15,28,0.85); padding: 1px 6px; border-radius: 20px;
+      border: 1px solid rgba(255,255,255,0.16);
+    }
+    .fmap-pin.is-sample img { opacity: 0.9; }
+
+    /* Leaflet's own chrome, toned to the portals. */
+    .fmap-live .leaflet-container { background: #0b1220; font-family: inherit; }
+    .fmap-live .leaflet-control-attribution {
+      background: rgba(9,15,28,0.8); color: #94a3b8; font-size: 9.5px;
+    }
+    .fmap-live .leaflet-control-attribution a { color: #93c5fd; }
+    .fmap-live .leaflet-popup-content-wrapper,
+    .fmap-live .leaflet-popup-tip { background: #1c2c48; color: #e2e8f0; }
+    .fmap-live .leaflet-popup-content { font-size: 12px; line-height: 1.5; margin: 10px 12px; }
+    .fmap-live .leaflet-popup-content small { color: #94a3b8; }
+    .fmap-live .leaflet-bar a {
+      background: #1c2c48; color: #e2e8f0; border-bottom-color: rgba(255,255,255,0.14);
+    }
+    .fmap-live .leaflet-bar a:hover { background: #263a5c; }
 
     /* Sits along the bottom rather than over the middle, so the map stays
        usable — an operator can pan to their routes while waiting. */
@@ -507,26 +707,33 @@ export function renderFleetMap(
     }
 
     const sampled = sampleFleet(fleet);
-    renderEmbedMap(
-      container,
-      { ...tracking, reporting: 0, total: fleet.length },
-      sampled,
-      { noteEl, compact, sample: true }
-    );
+    const summary = { ...tracking, reporting: 0, total: fleet.length };
+
+    renderLeafletMap(container, summary, sampled, { noteEl, compact, sample: true })
+      .then(ok => {
+        if (!ok) renderEmbedMap(container, summary, sampled, { noteEl, compact, sample: true });
+      });
     return;
   }
 
-  // With a key, every bus on one map. Without one, the keyless google.com/maps
-  // embed — still the real thing, one bus at a time.
+  // With a key, Google Maps. Without one, Leaflet — both mark every bus on one
+  // map. The single-bus embed is the last resort, for when neither library
+  // loads at all.
   if (apiKey) {
     renderGoogleMap(container, tracking, positioned, { noteEl, compact, apiKey }).then(ok => {
-      if (!ok) renderEmbedMap(container, tracking, positioned, { noteEl, compact });
+      if (ok) return;
+      return renderLeafletMap(container, tracking, positioned, { noteEl, compact, sample: false })
+        .then(fell => {
+          if (!fell) renderEmbedMap(container, tracking, positioned, { noteEl, compact });
+        });
     });
     return;
   }
 
-  liveMaps.delete(container);
-  renderEmbedMap(container, tracking, positioned, { noteEl, compact });
+  renderLeafletMap(container, tracking, positioned, { noteEl, compact, sample: false })
+    .then(ok => {
+      if (!ok) renderEmbedMap(container, tracking, positioned, { noteEl, compact });
+    });
 }
 
 /// The drawn stand-in, used until a Maps key is configured.
