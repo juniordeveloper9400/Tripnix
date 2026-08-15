@@ -102,9 +102,9 @@ class _LocationPromptBarState extends State<LocationPromptBar>
       case LocationBlock.none:
         return (
           icon: Icons.near_me_outlined,
-          title: 'Share your location',
-          message: 'Let your office and owner see where you are while you are '
-              'working.',
+          title: 'Share this bus’s location',
+          message: 'Let your office and owner see where your bus is while you '
+              'are driving.',
           action: 'Allow',
         );
     }
@@ -142,6 +142,14 @@ class _LocationPromptBarState extends State<LocationPromptBar>
 
       case LocationBlock.denied:
       case LocationBlock.none:
+        // No bus chosen yet: the position would have nothing to belong to, so
+        // this goes straight to the screen with the picker on it rather than
+        // raising a prompt that could not be acted on.
+        if (_sharing.needsVehicle) {
+          await _openLocationScreen();
+          return;
+        }
+
         // One tap does the whole thing: raises the permission prompt and, once
         // it is granted, starts reporting. Asking someone to allow location and
         // then hunt for a second button to actually share is how a position
@@ -161,9 +169,13 @@ class _LocationPromptBarState extends State<LocationPromptBar>
       builder: (context, _) {
         if (_dismissed) return const SizedBox.shrink();
 
-        // Nothing to file a position under — a signed-out visitor has no
-        // account for a position to belong to.
-        if (!_sharing.canShare) return const SizedBox.shrink();
+        // A signed-out visitor has no fleet to report into. Somebody signed in
+        // who has simply not picked a bus yet still sees the bar — the Location
+        // screen is where they choose one, and hiding it would leave them no
+        // way to get there.
+        if (!_sharing.canShare && !_sharing.needsVehicle) {
+          return const SizedBox.shrink();
+        }
 
         // Already reporting; the Location screen is where it is managed.
         if (_sharing.sharing) return const SizedBox.shrink();

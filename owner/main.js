@@ -1,4 +1,4 @@
-import { renderFleetMap, renderPersonMiniMap, fleetForDisplay, placeOf } from '../shared/fleet-map.js';
+import { renderFleetMap, renderBusMiniMap, fleetForDisplay, placeOf } from '../shared/fleet-map.js';
 
 const API_BASE = window.location.origin.includes('3006')
   ? 'http://localhost:3000/api'
@@ -1026,53 +1026,62 @@ function renderTracking() {
 
   // One decision for the map and the list, so they can never disagree about
   // whether these are real fixes or the sample preview.
-  const { people, sample } = fleetForDisplay(t);
+  const { vehicles, sample } = fleetForDisplay(t);
 
   document.getElementById('gps-note').textContent = sample
-    ? `Sample positions · somebody counts as live for ${t.staleAfterMinutes} minutes after their last fix`
-    : `${t.reporting} of ${t.total} sharing · somebody counts as live for ${t.staleAfterMinutes} minutes after their last fix`;
+    ? `Sample positions · a bus counts as live for ${t.staleAfterMinutes} minutes after its last fix`
+    : `${t.reporting} of ${t.total} reporting · a bus counts as live for ${t.staleAfterMinutes} minutes after its last fix`;
 
-  document.getElementById('gps-list').innerHTML = people.length
-    ? people.map(p => {
-        const l = p.location;
+  document.getElementById('gps-list').innerHTML = vehicles.length
+    ? vehicles.map(v => {
+        const l = v.location;
         const pill = sample
           ? '<span class="pill pill-amber">SAMPLE</span>'
-          : l.live
-            ? '<span class="pill pill-green">LIVE</span>'
-            : `<span class="pill pill-amber">${l.ageMinutes} MIN AGO</span>`;
+          : !l
+            ? '<span class="pill pill-grey">NO SIGNAL</span>'
+            : l.live
+              ? '<span class="pill pill-green">LIVE</span>'
+              : `<span class="pill pill-amber">${l.ageMinutes} MIN AGO</span>`;
 
-        // Where somebody is, in words. The API names every position when it is
+        // Where a bus is, in words. The API names every position when it is
         // reported, so this row reads "Chalakudy, Thrissur" rather than a pair
         // of numbers the owner would have to paste into a map to understand.
         const place = placeOf(l);
-        const where =
-          `${place ? escapeHtml(place) : 'Position received, place name not available'}` +
-          `${l.speedKph ? ' · ' + Math.round(l.speedKph) + ' km/h' : ''}`;
+        const where = !l
+          ? 'This bus has never reported a position'
+          : `${place ? escapeHtml(place) : 'Position received, place name not available'}` +
+            `${l.speedKph ? ' · ' + Math.round(l.speedKph) + ' km/h' : ''}`;
 
-        const link =
-          `<a class="map-link" href="https://www.google.com/maps?q=${l.lat},${l.lng}" target="_blank" rel="noopener">Open map ↗</a>`;
+        // Who is on the bus. The bus is the subject of the row, so the driver
+        // sits under it rather than replacing it as the heading.
+        const driver = l?.driverName
+          ? `<span class="row-sub">Driver: ${escapeHtml(l.driverName)}</span>`
+          : '';
+
+        const link = l
+          ? `<a class="map-link" href="https://www.google.com/maps?q=${l.lat},${l.lng}" target="_blank" rel="noopener">Open map ↗</a>`
+          : '';
 
         return `
           <div class="row row-with-map">
             <div class="row-main">
-              <strong>${escapeHtml(p.name)}</strong>
-              ${p.subtitle ? `<code>${escapeHtml(p.subtitle)}</code>` : ''}
+              <strong>${escapeHtml(v.name)}</strong>
+              <code>${escapeHtml(v.subtitle || '—')}</code>
               <span class="row-sub">${where}</span>
+              ${driver}
               <div class="row-right">${pill}${link}</div>
             </div>
-            <div class="row-map" data-person-map="${escapeHtml(p.id)}"></div>
+            <div class="row-map" data-bus-map="${v.id}"></div>
           </div>`;
       }).join('')
-    // Nobody sharing is a choice, not a fault, so this does not read as an
-    // error or imply anyone is missing.
-    : '<p class="empty">Nobody is sharing their location right now.</p>';
+    : '<p class="empty">No buses in the fleet yet.</p>';
 
-  // Each row gets its own small map of that person alone — one map cannot be
-  // centred on three people at once.
-  for (const p of people) {
-    renderPersonMiniMap(
-      document.querySelector(`[data-person-map="${CSS.escape(p.id)}"]`),
-      p,
+  // Each row gets its own small map of that bus alone — one map cannot be
+  // centred on three buses at once.
+  for (const v of vehicles) {
+    renderBusMiniMap(
+      document.querySelector(`[data-bus-map="${v.id}"]`),
+      v,
       { sample }
     );
   }

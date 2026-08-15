@@ -1,64 +1,64 @@
 import { Router } from "express";
-import { dbRef, databaseConfigured, describeDatabaseError, safeKey } from "../lib/firebase.js";
+import { allVehicles, refreshVehiclesFromDb } from "./vehicles.js";
+import { dbRef, databaseConfigured, describeDatabaseError } from "../lib/firebase.js";
 import { reverseGeocode, withinSamePlace, cachedPlaceName } from "../lib/geocode.js";
 
 const router = Router();
 
-/// Someone counts as reporting while their last fix is recent. Beyond this they
-/// are shown as out of contact rather than parked wherever they last spoke,
-/// which is the difference between "here" and "here two days ago".
+/// A bus counts as reporting while its last fix is recent. Beyond this it is
+/// shown as out of contact rather than parked wherever it last spoke, which is
+/// the difference between "here" and "here two days ago".
 const STALE_AFTER_MS = 15 * 60 * 1000;
 
-// Last known position per person, cached for this process. The database is the
+// Last known position per vehicle, cached for this process. The database is the
 // store — a serverless instance starts with none of these.
-let people = [];
+let locations = [];
 
-function peopleRef(path) {
-  return dbRef(path ? `people-locations/${path}` : "people-locations");
+function locationsRef(path) {
+  return dbRef(path ? `locations/${path}` : "locations");
 }
 
-/// The identity a fix is filed under.
+/// A position, filed against the bus it came from.
 ///
-/// Carried on the fix itself rather than looked up from the accounts tree: this
-/// route would otherwise need owner credentials to read the staff list, and a
-/// map of who is sharing should not depend on who is asking.
+/// The driver travels on the fix as well as the bus. The map is about buses —
+/// that is what an office dispatches — but "who is on it" is the next question
+/// anyone asks about a moving bus, and it costs nothing to carry the answer.
 function normaliseFix(raw) {
   if (!raw || typeof raw !== "object") return null;
-
-  const username = String(raw.username || "").trim();
+  const vehicleId = Number(raw.vehicleId);
   const lat = Number(raw.lat);
   const lng = Number(raw.lng);
-  if (!username || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-
+  if (!Number.isFinite(vehicleId) || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return null;
+  }
   return {
-    username,
-    operatorName: String(raw.operatorName || "").trim(),
-    // Falls back to the username so a row is never blank; an account created
-    // before display names existed still reads as somebody.
-    displayName: String(raw.displayName || "").trim() || username,
-    role: String(raw.role || "").trim(),
+    vehicleId,
     lat,
     lng,
     speedKph: Number(raw.speedKph ?? 0),
     heading: Number(raw.heading ?? 0),
+    // Who is sharing from this bus. Blank on fixes stored before drivers were
+    // recorded, which read as an unattributed position rather than a wrong one.
+    driverUsername: String(raw.driverUsername || "").trim(),
+    driverName: String(raw.driverName || "").trim(),
     // Worked out once when the fix was reported, so the portals never have to
-    // geocode and never disagree about where somebody is.
+    // geocode and never disagree about where a bus is.
     placeName: raw.placeName ?? "",
     reportedAt: raw.reportedAt ?? new Date(0).toISOString()
   };
 }
 
-export async function refreshPeopleFromDb() {
-  if (!databaseConfigured) return people;
+export async function refreshLocationsFromDb() {
+  if (!databaseConfigured) return locations;
   try {
-    const snap = await peopleRef().get();
-    people = Object.values(snap.val() || {})
+    const snap = await locationsRef().get();
+    locations = Object.values(snap.val() || {})
       .map(normaliseFix)
       .filter(Boolean);
   } catch (e) {
-    console.error("Database get people locations error:", e);
+    console.error("Database get locations error:", e);
   }
-  return people;
+  return locations;
 }
 
 /// Decorates a fix with how old it is, so a client never has to work out
@@ -67,7 +67,7 @@ function withFreshness(fix) {
   const at = new Date(fix.reportedAt).getTime();
   const ageMs = Number.isFinite(at) ? Date.now() - at : Number.MAX_SAFE_INTEGER;
   // Fixes stored before naming existed have no name of their own. If that
-  // square has since been looked up for anyone, they get it for free; a read
+  // square has since been looked up for any bus, they get it for free; a read
   // never waits on the geocoder to fill one in.
   const placeName = fix.placeName || cachedPlaceName(fix.lat, fix.lng);
   return {
@@ -75,6 +75,8 @@ function withFreshness(fix) {
     lng: fix.lng,
     speedKph: fix.speedKph,
     heading: fix.heading,
+    driverUsername: fix.driverUsername,
+    driverName: fix.driverName,
     placeName,
     // The one string a client should show for "where".
     place: placeName || "",
@@ -114,18 +116,18 @@ router.get("/config", (req, res) => {
   });
 });
 
-// POST /api/tracking/people/:username - a signed-in person reports where they are.
+// POST /api/tracking/vehicles/:id - a driver's phone reports where its bus is.
 //
-// Deliberately open to any device that knows the username, the same as the rest
-// of this API: there is no device authentication yet. Before this carries real
-// staff positions it needs a per-session token — anyone who knows a username can
-// currently post a position as them.
-router.post("/people/:username", async (req, res) => {
-  const username = String(req.params.username || "").trim();
-  const { lat, lng, speedKph, heading, operatorName, displayName, role } = req.body;
+// Deliberately open to any device that knows the vehicle id, the same as the
+// rest of this API: there is no device authentication yet. Before real vehicles
+// depend on it, this endpoint needs a per-device key — anyone who knows a
+// vehicle id can currently place that bus anywhere.
+router.post("/vehicles/:id", async (req, res) => {
+  const vehicleId = Number(req.params.id);
+  const { lat, lng, speedKph, heading, driverUsername, driverName } = req.body;
 
-  if (!username) {
-    return res.status(400).json({ error: "A username is required" });
+  if (!Number.isFinite(vehicleId)) {
+    return res.status(400).json({ error: "A numeric vehicle id is required" });
   }
   if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) {
     return res.status(400).json({ error: "lat and lng are required numbers" });
@@ -133,24 +135,22 @@ router.post("/people/:username", async (req, res) => {
   if (Math.abs(Number(lat)) > 90 || Math.abs(Number(lng)) > 180) {
     return res.status(400).json({ error: "lat must be within ±90 and lng within ±180" });
   }
-  if (!String(operatorName || "").trim()) {
-    // Without this the fix belongs to no agency and no portal would ever show
-    // it — better to refuse than to store something invisible.
-    return res.status(400).json({ error: "operatorName is required" });
-  }
 
-  await refreshPeopleFromDb();
-  const previous = people.find((p) => p.username === username);
+  await refreshVehiclesFromDb();
+  const vehicle = allVehicles().find((v) => v.id === vehicleId);
+  if (!vehicle) return res.status(404).json({ error: "Vehicle not found" });
+
+  await refreshLocationsFromDb();
+  const previous = locations.find((l) => l.vehicleId === vehicleId);
 
   const fix = {
-    username,
-    operatorName: String(operatorName).trim(),
-    displayName: String(displayName || "").trim() || username,
-    role: String(role || "").trim(),
+    vehicleId,
     lat: Number(lat),
     lng: Number(lng),
     speedKph: Number(speedKph ?? 0),
     heading: Number(heading ?? 0),
+    driverUsername: String(driverUsername || "").trim(),
+    driverName: String(driverName || "").trim(),
     placeName: "",
     reportedAt: new Date().toISOString()
   };
@@ -159,20 +159,20 @@ router.post("/people/:username", async (req, res) => {
   // one per viewer per refresh, and every client then shows the same name.
   fix.placeName = await reverseGeocode(fix.lat, fix.lng);
 
-  // A geocoder that is down or rate-limiting must not strip the name off
-  // somebody who has not actually moved — they would show as nameless until
-  // they travelled far enough to land in a cached square.
+  // A geocoder that is down or rate-limiting must not strip the name off a bus
+  // that has not actually moved — it would show as nameless until it drove far
+  // enough to land in a cached square.
   if (!fix.placeName && withinSamePlace(previous, fix)) {
     fix.placeName = previous.placeName || "";
   }
 
-  people = [...people.filter((p) => p.username !== username), fix];
+  locations = [...locations.filter((l) => l.vehicleId !== vehicleId), fix];
 
   if (databaseConfigured) {
     try {
-      await peopleRef(safeKey(username)).set(fix);
+      await locationsRef(String(vehicleId)).set(fix);
     } catch (e) {
-      console.error("Database save person location error:", e);
+      console.error("Database save location error:", e);
       const described = describeDatabaseError(e);
       return res.status(described?.status || 503).json({
         error: described?.message || `Could not record the position: ${e.message}`
@@ -183,22 +183,24 @@ router.post("/people/:username", async (req, res) => {
   res.status(201).json(withFreshness(fix));
 });
 
-// DELETE /api/tracking/people/:username - stop sharing, and leave no last position.
+// DELETE /api/tracking/vehicles/:id - the driver stops sharing.
 //
-// Stopping has to remove the fix, not just let it go stale: a position that
-// lingers for fifteen minutes after someone deliberately switched sharing off
-// is the app disregarding the decision they just made.
-router.delete("/people/:username", async (req, res) => {
-  const username = String(req.params.username || "").trim();
-  if (!username) return res.status(400).json({ error: "A username is required" });
+// Removing the fix rather than letting it go stale: a bus that stays on the map
+// for another fifteen minutes after its driver deliberately switched sharing
+// off is the app disregarding the decision they just made.
+router.delete("/vehicles/:id", async (req, res) => {
+  const vehicleId = Number(req.params.id);
+  if (!Number.isFinite(vehicleId)) {
+    return res.status(400).json({ error: "A numeric vehicle id is required" });
+  }
 
-  people = people.filter((p) => p.username !== username);
+  locations = locations.filter((l) => l.vehicleId !== vehicleId);
 
   if (databaseConfigured) {
     try {
-      await peopleRef(safeKey(username)).remove();
+      await locationsRef(String(vehicleId)).remove();
     } catch (e) {
-      console.error("Database delete person location error:", e);
+      console.error("Database delete location error:", e);
       const described = describeDatabaseError(e);
       return res.status(described?.status || 503).json({
         error: described?.message || `Could not stop sharing: ${e.message}`
@@ -209,31 +211,37 @@ router.delete("/people/:username", async (req, res) => {
   res.status(204).end();
 });
 
-// GET /api/tracking?operatorName=... - everyone in the agency who is sharing.
+// GET /api/tracking?operatorName=... - every bus in the fleet, with its last fix.
 //
-// Only people who have reported appear. Unlike a fleet of buses there is no
-// fixed roster to show as silent: somebody who has never turned sharing on has
-// not withheld a position, they have simply made a choice, and listing them as
-// "not reporting" would frame it as a fault.
+// Every bus appears, reporting or not. An agency with three buses should see
+// three rows: hiding the silent ones would hide exactly the ones worth chasing,
+// and an office counting its fleet on this screen needs the count to be right.
 router.get("/", async (req, res) => {
   const { operatorName } = req.query;
   if (!operatorName) {
     return res.status(400).json({ error: "operatorName query param is required" });
   }
 
-  await refreshPeopleFromDb();
+  await refreshVehiclesFromDb();
+  await refreshLocationsFromDb();
 
   const key = String(operatorName).trim().toLowerCase();
-  const rows = people
-    .filter((p) => String(p.operatorName).trim().toLowerCase() === key)
-    .map((person) => ({
-      id: person.username,
-      name: person.displayName,
-      subtitle: person.role,
-      location: withFreshness(person)
-    }))
+  const rows = allVehicles()
+    .filter((v) => String(v.operatorName).trim().toLowerCase() === key)
+    .map((vehicle) => {
+      const fix = locations.find((l) => l.vehicleId === vehicle.id);
+      return {
+        // The generic shape the shared map draws from: the bus is the subject,
+        // and its number is what identifies it on a marker.
+        id: vehicle.id,
+        name: vehicle.name,
+        subtitle: vehicle.vehicleNumber || "",
+        vehicleType: vehicle.type,
+        location: fix ? withFreshness(fix) : null
+      };
+    })
     .sort((a, b) => {
-      const rank = (r) => (r.location?.live ? 0 : 1);
+      const rank = (r) => (r.location?.live ? 0 : r.location ? 1 : 2);
       return rank(a) - rank(b) || String(a.name).localeCompare(String(b.name));
     });
 
@@ -242,7 +250,7 @@ router.get("/", async (req, res) => {
     reporting: rows.filter((r) => r.location?.live).length,
     total: rows.length,
     staleAfterMinutes: STALE_AFTER_MS / 60000,
-    people: rows
+    vehicles: rows
   });
 });
 

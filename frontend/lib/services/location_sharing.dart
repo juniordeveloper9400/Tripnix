@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../agency/agency_session.dart';
 import 'api_service.dart';
@@ -39,6 +40,10 @@ class LocationSharing extends ChangeNotifier with WidgetsBindingObserver {
   Timer? _heartbeatTimer;
   bool _observing = false;
 
+  /// The bus this phone is riding on, remembered so a driver picks it once
+  /// rather than every morning.
+  static const _vehicleKey = 'tripnix_tracking_vehicle_id';
+
   bool _sharing = false;
   bool _starting = false;
   bool _asking = false;
@@ -48,6 +53,9 @@ class LocationSharing extends ChangeNotifier with WidgetsBindingObserver {
   String _placeName = '';
   String? _error;
 
+  int? _vehicleId;
+  String _vehicleLabel = '';
+
   bool get sharing => _sharing;
   bool get starting => _starting;
   bool get asking => _asking;
@@ -56,14 +64,63 @@ class LocationSharing extends ChangeNotifier with WidgetsBindingObserver {
   String get placeName => _placeName;
   String? get error => _error;
 
-  /// True when there is an account to file positions under. Sharing is per
-  /// person, so a signed-out visitor has nothing to report as.
-  bool get canShare =>
-      _session.username.isNotEmpty && _session.operatorName.isNotEmpty;
+  /// Which bus this phone is reporting as, and how it reads on screen.
+  int? get vehicleId => _vehicleId;
+  String get vehicleLabel => _vehicleLabel;
 
-  /// True when the only thing between the user and sharing is the permission.
-  bool get needsPermission =>
-      _block == LocationBlock.denied || _block == LocationBlock.deniedForever;
+  /// True when there is a signed-in account and a bus chosen to report as.
+  ///
+  /// Both are needed: the position belongs to the bus, which is what an office
+  /// dispatches, but it is worth nothing if nobody knows which bus it is.
+  bool get canShare =>
+      _session.operatorName.isNotEmpty && _vehicleId != null;
+
+  /// True when the account is fine and only the bus is missing, so a screen can
+  /// tell someone to pick one rather than just disabling a button at them.
+  bool get needsVehicle =>
+      _session.operatorName.isNotEmpty && _vehicleId == null;
+
+  /// The bus this phone last reported as, from storage.
+  ///
+  /// Storage being unavailable costs a remembered choice, not the feature — the
+  /// driver simply picks their bus again.
+  Future<int?> loadRememberedVehicle() async {
+    if (_vehicleId != null) return _vehicleId;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final remembered = prefs.getInt(_vehicleKey);
+      if (remembered != null) {
+        _vehicleId = remembered;
+        notifyListeners();
+      }
+      return remembered;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Chooses the bus this phone reports as.
+  ///
+  /// Refused while sharing: switching mid-share would start reporting this
+  /// position as a different bus and put one somewhere it is not, leaving the
+  /// bus just abandoned frozen at its last fix.
+  Future<void> setVehicle(int id, {String label = ''}) async {
+    if (_sharing) return;
+    _vehicleId = id;
+    _vehicleLabel = label;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_vehicleKey, id);
+    } catch (_) {}
+  }
+
+  /// Keeps the on-screen name of the chosen bus current once the fleet loads.
+  void describeVehicle(int id, String label) {
+    if (_vehicleId != id || _vehicleLabel == label) return;
+    _vehicleLabel = label;
+    notifyListeners();
+  }
 
   void _ensureObserving() {
     if (_observing) return;
@@ -123,8 +180,13 @@ class LocationSharing extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> start() async {
     if (_sharing || _starting) return;
 
+    if (needsVehicle) {
+      _error = 'Choose which bus this phone is on before sharing.';
+      notifyListeners();
+      return;
+    }
     if (!canShare) {
-      _error = 'Sign in before sharing your location.';
+      _error = 'Sign in before sharing this bus’s location.';
       notifyListeners();
       return;
     }
@@ -196,13 +258,13 @@ class LocationSharing extends ChangeNotifier with WidgetsBindingObserver {
     _lastPosition = null;
     notifyListeners();
 
-    // The stored position goes with it. Leaving it to expire would keep the
-    // person on their agency's map for another fifteen minutes after they
+    // The stored position goes with it. Leaving it to expire would keep the bus
+    // on the agency's map for another fifteen minutes after its driver
     // deliberately switched sharing off.
-    final username = _session.username;
-    if (username.isEmpty) return;
+    final vehicleId = _vehicleId;
+    if (vehicleId == null) return;
     try {
-      await _api.stopSharingMyLocation(username);
+      await _api.stopSharingVehicleLocation(vehicleId);
     } catch (e) {
       _error = _clean(e);
       notifyListeners();
@@ -219,16 +281,18 @@ class LocationSharing extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
 
-    if (!canShare) return;
+    final vehicleId = _vehicleId;
+    if (vehicleId == null) return;
 
     try {
-      final fix = await _api.reportMyLocation(
-        username: _session.username,
-        operatorName: _session.operatorName,
-        displayName: _session.personName,
-        role: _session.role,
+      final fix = await _api.reportVehicleLocation(
+        vehicleId: vehicleId,
         lat: position.latitude,
         lng: position.longitude,
+        // Who is driving travels with the bus's position, so the office can
+        // ask "who is on it" without a second lookup.
+        driverUsername: _session.username,
+        driverName: _session.personName,
         speedKph: speedKphOf(position),
         heading: headingOf(position),
       );
