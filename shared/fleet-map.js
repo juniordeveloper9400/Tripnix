@@ -1,7 +1,7 @@
-// Where an agency's buses are, on a map.
+// Where an agency's people are, on a map.
 //
 // Shared by the admin and owner portals so the two can never drift into showing
-// the fleet differently — the same positions rendered two ways is worse than no
+// them differently — the same positions rendered two ways is worse than no
 // map at all.
 //
 // Real Google Maps when GOOGLE_MAPS_API_KEY is configured; otherwise Leaflet
@@ -11,11 +11,11 @@
 
 const STYLE_ID = 'tripnix-fleet-map-styles';
 
-/// Where a bus is, in words.
+/// Where somebody is, in words.
 ///
 /// The API names every fix from its coordinates when it is reported, so this is
 /// only ever picking which field carries that name. Coordinates are deliberately
-/// not a fallback: "10.52760, 76.21440" is not an answer to "where is my bus",
+/// not a fallback: "10.52760, 76.21440" is not an answer to "where is my driver",
 /// and showing it invites someone to paste it into another map to find out what
 /// this one already knows.
 export function placeOf(location) {
@@ -24,12 +24,12 @@ export function placeOf(location) {
 }
 
 /// Loads Leaflet once per page — the keyless path to a real, interactive map
-/// with a marker per bus.
+/// with a marker per person.
 ///
 /// Google's keyless embed can only ever show one place at a time and takes no
-/// custom markers, so a fleet had to be stepped through one bus at a time.
-/// Leaflet over CARTO's day basemap puts every bus on one map with no
-/// credentials at all, which is what a fleet view is for.
+/// custom markers, so a team had to be stepped through one person at a time.
+/// Leaflet over CARTO's day basemap puts everybody on one map with no
+/// credentials at all, which is what this view is for.
 let leafletLoader = null;
 
 function loadLeaflet() {
@@ -60,9 +60,9 @@ function loadLeaflet() {
   return leafletLoader;
 }
 
-/// The marker: a bus badge with the vehicle number under it, so every bus on
-/// the map is identifiable without clicking it.
-function busDivIcon(L, v, colour, sample) {
+/// The marker: a badge with the person's role under it, so everyone on the map
+/// is identifiable without clicking them.
+function personDivIcon(L, v, colour, sample) {
   return L.divIcon({
     className: 'fmap-pin-wrap',
     iconSize: [40, 52],
@@ -70,13 +70,13 @@ function busDivIcon(L, v, colour, sample) {
     popupAnchor: [0, -44],
     html: `
       <div class="fmap-pin${sample ? ' is-sample' : ''}">
-        <img src="${busIcon(colour)}" alt="" width="34" height="43">
-        <span>${esc(v.vehicleNumber || v.vehicleName)}</span>
+        <img src="${personIcon(colour)}" alt="" width="34" height="43">
+        <span>${esc(v.subtitle || v.name)}</span>
       </div>`
   });
 }
 
-/// Draws the fleet on Leaflet — every bus marked, no API key.
+/// Draws everybody on Leaflet — every person marked, no API key.
 async function renderLeafletMap(container, t, placed, { noteEl, compact, sample }) {
   let L;
   try {
@@ -126,30 +126,30 @@ async function renderLeafletMap(container, t, placed, { noteEl, compact, sample 
   for (const v of placed) {
     const l = v.location;
     const colour = l.live ? '#0ca30c' : '#fab219';
-    seen.add(v.vehicleId);
+    seen.add(v.id);
     bounds.push([l.lat, l.lng]);
 
     const place = placeOf(l);
     const popup = `
-      <strong>${esc(v.vehicleName)}</strong><br>
-      ${esc(v.vehicleNumber || '')} · ${l.live ? 'Live now' : l.ageMinutes + ' min ago'}<br>
+      <strong>${esc(v.name)}</strong><br>
+      ${esc(v.subtitle || '')} · ${l.live ? 'Live now' : l.ageMinutes + ' min ago'}<br>
       <small>${place ? esc(place) : 'Place name not available'}</small>
       ${l.speedKph ? '<br>' + Math.round(l.speedKph) + ' km/h' : ''}
       ${sample ? '<br><em>Sample position</em>' : ''}`;
 
-    let marker = live.markers.get(v.vehicleId);
+    let marker = live.markers.get(v.id);
     if (marker) {
-      // Moved rather than rebuilt, so a bus that reports again slides across
+      // Moved rather than rebuilt, so somebody who reports again slides across
       // instead of the whole layer blinking.
       marker.setLatLng([l.lat, l.lng]);
-      marker.setIcon(busDivIcon(live.L, v, colour, sample));
+      marker.setIcon(personDivIcon(live.L, v, colour, sample));
       marker.setPopupContent(popup);
     } else {
       marker = live.L
-        .marker([l.lat, l.lng], { icon: busDivIcon(live.L, v, colour, sample) })
+        .marker([l.lat, l.lng], { icon: personDivIcon(live.L, v, colour, sample) })
         .addTo(live.map)
         .bindPopup(popup);
-      live.markers.set(v.vehicleId, marker);
+      live.markers.set(v.id, marker);
     }
   }
 
@@ -178,44 +178,44 @@ async function renderLeafletMap(container, t, placed, { noteEl, compact, sample 
   const silent = t.total - placed.length;
   container.querySelector('.fmap-legend').innerHTML = sample
     ? `<span><i style="background:#fab219"></i>Sample data</span>
-       <span class="fmap-note">Tap a bus for its detail</span>`
+       <span class="fmap-note">Tap a person for their detail</span>`
     : `<span><i style="background:#0ca30c"></i>Live</span>
        <span><i style="background:#fab219"></i>Last seen earlier</span>
        ${silent ? `<span><i style="background:#94a3b8"></i>${silent} not reporting</span>` : ''}
-       <span class="fmap-note">Tap a bus for its detail</span>`;
+       <span class="fmap-note">Tap a person for their detail</span>`;
 
   if (noteEl) {
     noteEl.textContent = sample
-      ? `Sample positions · ${placed.length} bus${placed.length === 1 ? '' : 'es'} shown`
+      ? `Sample positions · ${placed.length} ${placed.length === 1 ? 'person' : 'people'} shown`
       : `${t.reporting} of ${t.total} reporting`;
   }
 
   return true;
 }
 
-/// The fleet as it should be shown: real positions when any exist, sample spots
-/// otherwise.
+/// The people as they should be shown: real positions when any exist, sample
+/// spots otherwise.
 ///
 /// Exported so the map and the list beside it work from one decision. Deciding
 /// separately is how a list ends up saying "no signal" next to a map showing
-/// the bus somewhere.
+/// somebody somewhere.
 export function fleetForDisplay(tracking) {
-  const vehicles = tracking?.vehicles || [];
-  const positioned = vehicles.filter(v => v.location);
-  if (positioned.length) return { vehicles, sample: false };
-  if (!vehicles.length) return { vehicles, sample: false };
-  return { vehicles: sampleFleet(vehicles), sample: true };
+  const people = tracking?.people || [];
+  const positioned = people.filter(p => p.location);
+  if (positioned.length) return { people, sample: false };
+  if (!people.length) return { people, sample: false };
+  return { people: sampleFleet(people), sample: true };
 }
 
-/// One bus on its own small map, for a row in the positions list.
+/// One person on their own small map, for a row in the positions list.
 ///
 /// Its own Leaflet instance rather than a shared one: each row is centred on a
-/// different bus, which one map cannot be at once.
-export async function renderBusMiniMap(container, vehicle, { sample = false } = {}) {
+/// different person, which one map cannot be at once.
+export async function renderPersonMiniMap(container, person, { sample = false } = {}) {
   if (!container) return false;
   ensureStyles();
 
-  const l = vehicle?.location;
+  const l = person?.location;
   if (!l) {
     container.innerHTML = `<div class="fmap-mini is-empty"><span>No position yet</span></div>`;
     return false;
@@ -257,7 +257,7 @@ export async function renderBusMiniMap(container, vehicle, { sample = false } = 
   }).addTo(map);
 
   const marker = L.marker([l.lat, l.lng], {
-    icon: busDivIcon(L, vehicle, l.live ? '#0ca30c' : '#fab219', sample),
+    icon: personDivIcon(L, person, l.live ? '#0ca30c' : '#fab219', sample),
     interactive: false
   }).addTo(map);
 
@@ -296,17 +296,18 @@ function loadGoogleMaps(apiKey) {
   return mapsLoader;
 }
 
-/// The bus marker, as an SVG data URI so Google Maps can use it as an icon.
-function busIcon(colour) {
+/// The marker, as an SVG data URI so Google Maps can use it as an icon.
+///
+/// A person rather than the bus this used to draw: what is on the map now is
+/// where somebody is, and a bus badge over a person's position would claim a
+/// vehicle is there that nobody has said anything about.
+function personIcon(colour) {
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" width="44" height="56" viewBox="0 0 44 56">
       <path d="M22,54 L13,38 h18 z" fill="${colour}"/>
       <circle cx="22" cy="21" r="18" fill="${colour}" stroke="#0b1220" stroke-width="2.5"/>
-      <rect x="13" y="11" width="18" height="16" rx="3" fill="#ffffff"/>
-      <rect x="15.2" y="13" width="13.6" height="6" rx="1.4" fill="${colour}"/>
-      <rect x="15.2" y="20.6" width="13.6" height="2" rx="0.9" fill="${colour}" opacity="0.45"/>
-      <circle cx="17" cy="28.4" r="2.3" fill="#0b1220"/>
-      <circle cx="27" cy="28.4" r="2.3" fill="#0b1220"/>
+      <circle cx="22" cy="16.5" r="5.2" fill="#ffffff"/>
+      <path d="M12.4,31.5 a9.6,9.6 0 0 1 19.2,0 z" fill="#ffffff"/>
     </svg>`;
   return 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg.trim());
 }
@@ -315,19 +316,19 @@ function busIcon(colour) {
 /// does not flash and re-centre every time the fleet reloads.
 const liveMaps = new WeakMap();
 
-/// Where the map opens before any bus has reported.
+/// Where the map opens before anybody has reported.
 ///
 /// A real map of somewhere is far more use than a drawing of nowhere: the
-/// controls work, the operator can pan to the routes they run, and a bus
-/// appearing later lands on the map already on screen. Kochi because the fleet
+/// controls work, the operator can pan to the routes they run, and somebody
+/// appearing later lands on the map already on screen. Kochi because the agency
 /// is Kerala-registered; it is only a starting view and moves the moment a
 /// tracker posts a fix.
 const DEFAULT_VIEW = { lat: 9.9312, lng: 76.2673, zoom: 9 };
 
-/// Towns a Kerala fleet actually runs between, used to place buses on the map
+/// Towns a Kerala fleet actually runs between, used to place people on the map
 /// before any tracker exists so the view can be seen working.
 ///
-/// Real coordinates rather than random jitter: scattered noise puts buses in
+/// Real coordinates rather than random jitter: scattered noise puts people in
 /// fields and out at sea, which looks broken rather than plausible.
 const SAMPLE_PLACES = [
   { label: 'Kochi', lat: 9.9312, lng: 76.2673 },
@@ -342,18 +343,32 @@ const SAMPLE_PLACES = [
   { label: 'Wayanad', lat: 11.6854, lng: 76.1320 }
 ];
 
-/// Gives every bus its own place, so the map shows a spread fleet rather than a
+/// A stable number for a string id, so a username can pick a sample spot.
+///
+/// Ids are usernames now rather than numeric vehicle ids, and Number("rajesh")
+/// is NaN — which would send every marker to the same place and make the
+/// preview look like everyone was standing on one spot.
+function hashId(value) {
+  const text = String(value ?? '');
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) {
+    hash = (hash * 31 + text.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+/// Gives everybody their own place, so the map shows a spread rather than a
 /// stack of markers on one point.
 ///
-/// Deterministic on the vehicle id: the same bus keeps the same sample spot
-/// across refreshes, which a random position would not — markers would jump
-/// about every few seconds and look like the tracking was broken.
+/// Deterministic on the id: the same person keeps the same sample spot across
+/// refreshes, which a random position would not — markers would jump about
+/// every few seconds and look like the tracking was broken.
 ///
 /// These are never stored and never leave the browser. Real fixes always win:
-/// the moment a tracker reports, this is not used at all.
-function sampleFleet(vehicles) {
-  return vehicles.map((v, i) => {
-    const spot = SAMPLE_PLACES[(Number(v.vehicleId) + i) % SAMPLE_PLACES.length];
+/// the moment somebody reports, this is not used at all.
+function sampleFleet(people) {
+  return people.map((v, i) => {
+    const spot = SAMPLE_PLACES[(hashId(v.id) + i) % SAMPLE_PLACES.length];
     return {
       ...v,
       location: {
@@ -407,7 +422,7 @@ function ensureStyles() {
       .fmap-live.is-compact .fmap-embed { height: 220px; }
     }
 
-    /* One bus per embed, so the fleet is a row to choose from. */
+    /* One person per embed, so the team is a row to choose from. */
     .fmap-chips { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 10px; }
     .fmap-chip {
       display: inline-flex; align-items: center; gap: 6px;
@@ -426,7 +441,7 @@ function ensureStyles() {
     .fmap-open { margin-left: auto; color: #93c5fd; text-decoration: none; }
     .fmap-open:hover { text-decoration: underline; }
 
-    /* Every bus marked at once: the badge with its number under it, so the map
+    /* Everyone marked at once: the badge with their role under it, so the map
        is readable without clicking each one. */
     .fmap-pin-wrap { background: none !important; border: 0 !important; }
     .fmap-pin { display: flex; flex-direction: column; align-items: center; gap: 1px; }
@@ -539,7 +554,7 @@ function renderWaitingMap(container, t, { noteEl, compact }) {
   const src = `https://www.google.com/maps?q=${lat},${lng}&hl=en&z=${zoom}&output=embed`;
 
   if (noteEl) {
-    noteEl.textContent = t.total ? 'No bus has reported a position yet' : '';
+    noteEl.textContent = t.total ? 'Nobody has reported a position yet' : '';
   }
 
   container.innerHTML = `
@@ -552,8 +567,8 @@ function renderWaitingMap(container, t, { noteEl, compact }) {
         <div>
           <strong>Waiting for the first position</strong>
           <span>${t.total
-            ? `${t.total} bus${t.total === 1 ? '' : 'es'} on the books, none reporting yet — they appear here the moment a tracker posts a fix.`
-            : 'No buses in the fleet yet.'}</span>
+            ? `${t.total} ${t.total === 1 ? 'person' : 'people'} known, none reporting yet — they appear here the moment somebody shares their location.`
+            : 'Nobody is sharing their location yet.'}</span>
         </div>
       </div>
     </div>`;
@@ -572,27 +587,28 @@ function renderWaitingMap(container, t, { noteEl, compact }) {
 /// route is the Maps Embed API, which needs a key.
 function renderEmbedMap(container, t, placed, { noteEl, compact, sample = false }) {
   // Survives a refresh, so a reload does not throw the viewer back to the first
-  // bus while they are looking at another.
-  const wanted = Number(container.dataset.fleetMapBus);
+  // person while they are looking at another. Compared as a string: ids are
+  // usernames now, and the old numeric coercion matched nothing.
+  const wanted = container.dataset.fleetMapPerson;
   const selected =
-    placed.find(v => v.vehicleId === wanted) ||
+    placed.find(v => String(v.id) === wanted) ||
     placed.find(v => v.location.live) ||
     placed[0];
 
-  container.dataset.fleetMapBus = String(selected.vehicleId);
+  container.dataset.fleetMapPerson = String(selected.id);
 
   const l = selected.location;
   const src =
     `https://www.google.com/maps?q=${l.lat},${l.lng}&hl=en&z=${compact ? 13 : 14}&output=embed`;
 
   const chips = placed.map(v => {
-    const on = v.vehicleId === selected.vehicleId;
+    const on = v.id === selected.id;
     const live = v.location.live;
     return `
       <button type="button" class="fmap-chip${on ? ' is-on' : ''}"
-              data-fleet-map-bus="${v.vehicleId}">
+              data-fleet-map-person="${v.id}">
         <i style="background:${live ? '#0ca30c' : '#fab219'}"></i>
-        ${esc(v.vehicleNumber || v.vehicleName)}
+        ${esc(v.subtitle || v.name)}
         <span>${live ? 'live' : v.location.ageMinutes + 'm'}</span>
       </button>`;
   }).join('');
@@ -602,7 +618,7 @@ function renderEmbedMap(container, t, placed, { noteEl, compact, sample = false 
   container.innerHTML = `
     ${placed.length > 1 ? `<div class="fmap-chips">${chips}</div>` : ''}
     <div class="fmap fmap-live${compact ? ' is-compact' : ''}">
-      <iframe class="fmap-embed" src="${src}" title="Map of ${esc(selected.vehicleName)}"
+      <iframe class="fmap-embed" src="${src}" title="Map of ${esc(selected.name)}"
               loading="lazy" allowfullscreen
               referrerpolicy="no-referrer-when-downgrade"></iframe>
       ${sample ? `
@@ -626,10 +642,10 @@ function renderEmbedMap(container, t, placed, { noteEl, compact, sample = false 
         Open in Google Maps ↗</a>
     </div>`;
 
-  container.querySelectorAll('[data-fleet-map-bus]').forEach(btn =>
+  container.querySelectorAll('[data-fleet-map-person]').forEach(btn =>
     btn.addEventListener('click', () => {
-      container.dataset.fleetMapBus = btn.dataset.fleetMapBus;
-      // The flag has to travel with the re-render, or picking a second bus
+      container.dataset.fleetMapPerson = btn.dataset.fleetMapPerson;
+      // The flag has to travel with the re-render, or picking a second person
       // would drop the "sample" labelling and start looking like real tracking.
       renderEmbedMap(container, t, placed, { noteEl, compact, sample });
     })
@@ -638,9 +654,9 @@ function renderEmbedMap(container, t, placed, { noteEl, compact, sample = false 
   if (noteEl) {
     const place = placeOf(l);
     noteEl.textContent = sample
-      ? `Sample positions · showing ${selected.vehicleNumber || selected.vehicleName}` +
+      ? `Sample positions · showing ${selected.subtitle || selected.name}` +
         `${place ? ' near ' + place : ''}`
-      : `${t.reporting} of ${t.total} reporting · showing ${selected.vehicleNumber || selected.vehicleName}` +
+      : `${t.reporting} of ${t.total} reporting · showing ${selected.subtitle || selected.name}` +
         `${place ? ' near ' + place : ''}`;
   }
 }
@@ -690,36 +706,36 @@ async function renderGoogleMap(container, t, placed, { noteEl, compact, apiKey }
     const colour = l.live ? '#0ca30c' : '#fab219';
     const position = { lat: l.lat, lng: l.lng };
     bounds.extend(position);
-    seen.add(v.vehicleId);
+    seen.add(v.id);
 
-    const label = v.vehicleNumber || v.vehicleName;
+    const label = v.subtitle || v.name;
     const place = placeOf(l);
     const detail =
       `${l.live ? 'Live now' : l.ageMinutes + ' min ago'}` +
       `${place ? ' · ' + esc(place) : ''}` +
       `${l.speedKph ? ' · ' + Math.round(l.speedKph) + ' km/h' : ''}`;
 
-    let marker = live.markers.get(v.vehicleId);
+    let marker = live.markers.get(v.id);
     if (marker) {
-      // Moved rather than replaced, so a bus that reports again slides to its
+      // Moved rather than replaced, so somebody who reports again slides to its
       // new position instead of the whole layer blinking.
       marker.setPosition(position);
-      marker.setIcon({ url: busIcon(colour), scaledSize: new maps.Size(34, 43), anchor: new maps.Point(17, 43) });
+      marker.setIcon({ url: personIcon(colour), scaledSize: new maps.Size(34, 43), anchor: new maps.Point(17, 43) });
     } else {
       marker = new maps.Marker({
         map: live.map,
         position,
-        title: `${v.vehicleName} · ${detail.replace(/<[^>]*>/g, '')}`,
-        icon: { url: busIcon(colour), scaledSize: new maps.Size(34, 43), anchor: new maps.Point(17, 43) },
+        title: `${v.name} · ${detail.replace(/<[^>]*>/g, '')}`,
+        icon: { url: personIcon(colour), scaledSize: new maps.Size(34, 43), anchor: new maps.Point(17, 43) },
         zIndex: l.live ? 2 : 1
       });
-      live.markers.set(v.vehicleId, marker);
+      live.markers.set(v.id, marker);
     }
 
     marker.addListener('click', () => {
       live.info.setContent(
         `<div style="font-family:system-ui;color:#0b1220;min-width:150px">
-           <strong style="font-size:13px">${esc(v.vehicleName)}</strong><br>
+           <strong style="font-size:13px">${esc(v.name)}</strong><br>
            <span style="font-size:11px;color:#475569">${esc(label)} · ${detail}</span><br>
            <span style="font-size:10.5px;color:#64748b">${
              place ? esc(place) : 'Place name not available'
@@ -730,7 +746,7 @@ async function renderGoogleMap(container, t, placed, { noteEl, compact, apiKey }
     });
   }
 
-  // Buses that stopped reporting since the last refresh lose their marker.
+  // People who stopped reporting since the last refresh lose their marker.
   for (const [id, marker] of live.markers) {
     if (!seen.has(id)) {
       marker.setMap(null);
@@ -760,7 +776,7 @@ async function renderGoogleMap(container, t, placed, { noteEl, compact, apiKey }
     <span><i style="background:#0ca30c"></i>Live</span>
     <span><i style="background:#fab219"></i>Last seen earlier</span>
     ${silent ? `<span><i style="background:#94a3b8"></i>${silent} not reporting</span>` : ''}
-    <span class="fmap-note">Tap a bus for its detail</span>`;
+    <span class="fmap-note">Tap a person for their detail</span>`;
 
   if (legend) {
     legend.innerHTML = legendHtml;
@@ -784,7 +800,7 @@ export function renderFleetMap(
   if (!container) return;
   ensureStyles();
 
-  const positioned = (tracking?.vehicles || []).filter(v => v.location);
+  const positioned = (tracking?.people || []).filter(p => p.location);
 
   // With nothing reporting, the fleet is placed on sample spots so the map can
   // be seen working before any tracker exists. Clearly marked throughout: a
@@ -792,10 +808,10 @@ export function renderFleetMap(
   // one, because someone would dispatch on it.
   if (!positioned.length) {
     liveMaps.delete(container);
-    const fleet = (tracking?.vehicles || []);
+    const fleet = (tracking?.people || []);
 
     if (!fleet.length) {
-      delete container.dataset.fleetMapBus;
+      delete container.dataset.fleetMapPerson;
       renderWaitingMap(container, tracking, { noteEl, compact });
       return;
     }

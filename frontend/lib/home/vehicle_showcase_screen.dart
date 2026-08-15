@@ -242,37 +242,63 @@ class _ExploreTabState extends State<_ExploreTab> {
       .where((v) => _matchesOtherFilters(v) && _inSeatBand(v, index))
       .length;
 
-  /// Category, agency, seats and search narrow the list. The chosen date
-  /// deliberately does not: a bus busy that day is shown dimmed with the date
-  /// it next comes free, because dropping it made an agency's newly added bus
-  /// look as though it had never been published at all.
-  List<Vehicle> get _filteredVehicles {
-    final matching = _allVehicles
-        .where((v) => _matchesOtherFilters(v) && _inSeatBand(v))
+  /// Everything category, agency, seats and search allow — before the date has
+  /// its say.
+  ///
+  /// Kept separate from [_filteredVehicles] so the screen can still tell the
+  /// traveller what the date is hiding. Deliberately left in the order the API
+  /// returned: sorting by next-free-date here would push always-available buses
+  /// (which report no next date, having posted no calendar) to the bottom of
+  /// the visible list for no reason a traveller could see.
+  List<Vehicle> get _matchingVehicles => _allVehicles
+      .where((v) => _matchesOtherFilters(v) && _inSeatBand(v))
+      .toList();
+
+  /// The buses actually shown: only those an agency has posted as free on the
+  /// chosen day.
+  ///
+  /// A bus whose agency posted no dates at all stays visible — [vehicleAvailableOn]
+  /// treats "no dates" as always free, so a listing that has simply never had a
+  /// calendar set does not silently disappear the moment dates start filtering.
+  List<Vehicle> get _filteredVehicles => _matchingVehicles
+      .where((v) => vehicleAvailableOn(v, _selectedDate))
+      .toList();
+
+  /// The buses the date alone is keeping off the list, soonest to come free
+  /// first.
+  ///
+  /// Filtering by date is right, but doing it silently is what makes an agency
+  /// think its newly added bus never published. Counting these lets the screen
+  /// say what is hidden and offer the day to see it. Sorting them here — rather
+  /// than in [_matchingVehicles], where it would disturb the visible order — is
+  /// what makes [_nextFreeDate] the nearest day rather than an arbitrary one.
+  List<Vehicle> get _busyOnSelectedDate {
+    final busy = _matchingVehicles
+        .where((v) => !vehicleAvailableOn(v, _selectedDate))
         .toList();
 
-    // Bookable on the chosen day leads; the rest follow in the order they come
-    // free, so the soonest alternative is the first one a traveller sees.
-    matching.sort((a, b) {
-      final aFree = vehicleAvailableOn(a, _selectedDate);
-      final bFree = vehicleAvailableOn(b, _selectedDate);
-      if (aFree != bFree) return aFree ? -1 : 1;
-      if (aFree) return 0;
-
+    busy.sort((a, b) {
       final aNext = nextAvailableDate(a, _selectedDate);
       final bNext = nextAvailableDate(b, _selectedDate);
+      // A bus with no upcoming date is booked out for good; it sinks to the
+      // bottom because there is no day to send anyone to.
       if (aNext == null && bNext == null) return 0;
       if (aNext == null) return 1;
       if (bNext == null) return -1;
       return aNext.compareTo(bNext);
     });
 
-    return matching;
+    return busy;
   }
 
-  /// How many of the listed buses can actually be booked on the chosen day.
-  int get _availableCount =>
-      _filteredVehicles.where((v) => vehicleAvailableOn(v, _selectedDate)).length;
+  /// The soonest day any currently hidden bus is free, for the offer to jump.
+  DateTime? get _nextFreeDate {
+    for (final vehicle in _busyOnSelectedDate) {
+      final next = nextAvailableDate(vehicle, _selectedDate);
+      if (next != null) return next;
+    }
+    return null;
+  }
 
   static const List<String> _months = [
     'Jan',
@@ -298,10 +324,10 @@ class _ExploreTabState extends State<_ExploreTab> {
     'Sun',
   ];
 
-  String get _selectedDateLabel {
-    final d = _selectedDate;
-    return '${_weekdays[d.weekday - 1]}, ${_months[d.month - 1]} ${d.day}';
-  }
+  String _dateLabel(DateTime d) =>
+      '${_weekdays[d.weekday - 1]}, ${_months[d.month - 1]} ${d.day}';
+
+  String get _selectedDateLabel => _dateLabel(_selectedDate);
 
   @override
   Widget build(BuildContext context) {
@@ -607,11 +633,9 @@ class _ExploreTabState extends State<_ExploreTab> {
                     const SizedBox(width: 8),
                     if (!_isLoading && _errorMessage == null)
                       Text(
-                        // Both figures, so "3 buses, 1 free today" is obvious
-                        // rather than looking like two of them vanished.
-                        list.length == _availableCount
-                            ? '${list.length} on $_selectedDateLabel'
-                            : '$_availableCount of ${list.length} on $_selectedDateLabel',
+                        // Every bus listed is free on the chosen day now that
+                        // the date filters, so one figure says it all.
+                        '${list.length} on $_selectedDateLabel',
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
@@ -622,6 +646,21 @@ class _ExploreTabState extends State<_ExploreTab> {
                 ),
               ),
             ),
+            // What the date is hiding. Filtering by day is the point, but doing
+            // it silently is what makes an agency think its bus never
+            // published — this names the count and offers the day to see them.
+            if (!_isLoading && _errorMessage == null && _busyOnSelectedDate.isNotEmpty)
+              SliverToBoxAdapter(
+                child: _HiddenByDateBar(
+                  count: _busyOnSelectedDate.length,
+                  selectedDateLabel: _selectedDateLabel,
+                  nextFreeDate: _nextFreeDate,
+                  nextFreeLabel: _nextFreeDate == null
+                      ? null
+                      : _dateLabel(_nextFreeDate!),
+                  onJump: (date) => setState(() => _selectedDate = date),
+                ),
+              ),
             // List of vehicles
             if (_isLoading)
               const SliverFillRemaining(
@@ -640,6 +679,18 @@ class _ExploreTabState extends State<_ExploreTab> {
                 hasScrollBody: false,
                 child: _EmptyState(
                   noVehiclesAtAll: _allVehicles.isEmpty,
+                  // When the other filters do match buses and the list is still
+                  // empty, the date is the only thing that can have emptied it,
+                  // and saying so is the difference between "nothing matches"
+                  // and "nothing on this day".
+                  busyCount: _busyOnSelectedDate.length,
+                  selectedDateLabel: _selectedDateLabel,
+                  nextFreeDate: _nextFreeDate,
+                  nextFreeLabel: _nextFreeDate == null
+                      ? null
+                      : _dateLabel(_nextFreeDate!),
+                  onJumpToNextFree: (date) =>
+                      setState(() => _selectedDate = date),
                   seatBandLabel: (_seatBand == 0 || _seatBand >= _currentSeatBands.length)
                       ? null
                       : _currentSeatBands[_seatBand].label,
@@ -651,21 +702,10 @@ class _ExploreTabState extends State<_ExploreTab> {
                 padding: const EdgeInsets.only(bottom: 40),
                 sliver: SliverList(
                   delegate: SliverChildBuilderDelegate((context, index) {
-                    final vehicle = list[index];
-                    final free = vehicleAvailableOn(vehicle, _selectedDate);
-                    return VehicleCard(
-                      vehicle: vehicle,
-                      availableOnSelectedDate: free,
-                      nextAvailable: free
-                          ? null
-                          : nextAvailableDate(vehicle, _selectedDate),
-                      // Tapping a busy bus moves the whole screen to the day it
-                      // is free, rather than opening a bus that cannot be
-                      // booked on the date being shown.
-                      onJumpToNextAvailable: free
-                          ? null
-                          : (date) => setState(() => _selectedDate = date),
-                    );
+                    // No availability arguments: the list is already only the
+                    // buses free on the chosen day, so the card's busy state
+                    // cannot arise here.
+                    return VehicleCard(vehicle: list[index]);
                   }, childCount: list.length),
                 ),
               ),
@@ -676,9 +716,94 @@ class _ExploreTabState extends State<_ExploreTab> {
   }
 }
 
+/// Tells the traveller how many buses the chosen day is hiding, and offers the
+/// first day they can be seen.
+///
+/// Shown above a list that does have results, so it never blocks the buses that
+/// are free — it just stops the ones that are not from vanishing without
+/// explanation.
+class _HiddenByDateBar extends StatelessWidget {
+  const _HiddenByDateBar({
+    required this.count,
+    required this.selectedDateLabel,
+    required this.nextFreeDate,
+    required this.nextFreeLabel,
+    required this.onJump,
+  });
+
+  final int count;
+  final String selectedDateLabel;
+
+  /// Null when every hidden bus is booked out for good — there is then no day
+  /// to offer, and the bar says only what is hidden.
+  final DateTime? nextFreeDate;
+  final String? nextFreeLabel;
+
+  final void Function(DateTime date) onJump;
+
+  @override
+  Widget build(BuildContext context) {
+    final date = nextFreeDate;
+    final label = nextFreeLabel;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        decoration: BoxDecoration(
+          color: AppColors.pillBg,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.event_busy_outlined, size: 18, color: Colors.grey[700]),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                count == 1
+                    ? '1 more bus is not free on $selectedDateLabel'
+                    : '$count more buses are not free on $selectedDateLabel',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  height: 1.35,
+                  color: Colors.grey[800],
+                ),
+              ),
+            ),
+            if (date != null && label != null) ...[
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: () => onJump(date),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppColors.red,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  minimumSize: const Size(0, 32),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: Text(
+                  'See $label',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12.5,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _EmptyState extends StatelessWidget {
   const _EmptyState({
     required this.noVehiclesAtAll,
+    this.busyCount = 0,
+    this.selectedDateLabel,
+    this.nextFreeDate,
+    this.nextFreeLabel,
+    this.onJumpToNextFree,
     this.seatBandLabel,
     this.onClearSeats,
   });
@@ -687,14 +812,28 @@ class _EmptyState extends StatelessWidget {
   /// filters simply excluding everything — the two need different advice.
   final bool noVehiclesAtAll;
 
+  /// How many buses the other filters matched but the chosen day excluded.
+  /// Above zero means the date emptied this list, not the category or search.
+  final int busyCount;
+  final String? selectedDateLabel;
+  final DateTime? nextFreeDate;
+  final String? nextFreeLabel;
+  final void Function(DateTime date)? onJumpToNextFree;
+
   /// The seat band in force, when one is. Named in the message and offered as
   /// the thing to undo, because a size filter is the easiest of the filters to
   /// set and then forget about.
   final String? seatBandLabel;
   final VoidCallback? onClearSeats;
 
+  /// The date is to blame only when buses did match everything else.
+  bool get _dateIsTheCause => !noVehiclesAtAll && busyCount > 0;
+
   @override
   Widget build(BuildContext context) {
+    final jumpDate = nextFreeDate;
+    final jumpLabel = nextFreeLabel;
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32.0),
@@ -702,7 +841,11 @@ class _EmptyState extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(
-              noVehiclesAtAll ? Icons.storefront_outlined : Icons.commute_outlined,
+              noVehiclesAtAll
+                  ? Icons.storefront_outlined
+                  : _dateIsTheCause
+                  ? Icons.event_busy_outlined
+                  : Icons.commute_outlined,
               size: 70,
               color: Colors.grey[400],
             ),
@@ -710,6 +853,8 @@ class _EmptyState extends StatelessWidget {
             Text(
               noVehiclesAtAll
                   ? 'No Vehicles Listed Yet'
+                  : _dateIsTheCause
+                  ? 'Nothing free on ${selectedDateLabel ?? 'this day'}'
                   : 'No Vehicles Matching Filter',
               style: const TextStyle(
                 fontSize: 16,
@@ -722,6 +867,12 @@ class _EmptyState extends StatelessWidget {
             Text(
               noVehiclesAtAll
                   ? 'Buses and cars appear here as soon as a travel agency adds them.'
+                  : _dateIsTheCause
+                  ? (busyCount == 1
+                        ? '1 bus matches, but its agency has not posted this day '
+                              'as available. Try another date.'
+                        : '$busyCount buses match, but their agencies have not '
+                              'posted this day as available. Try another date.')
                   : seatBandLabel != null
                   ? 'Nothing seats "$seatBandLabel" with your other filters. '
                         'Try another size, or widen the category and search.'
@@ -729,6 +880,24 @@ class _EmptyState extends StatelessWidget {
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.grey[600]),
             ),
+            if (_dateIsTheCause &&
+                jumpDate != null &&
+                jumpLabel != null &&
+                onJumpToNextFree != null) ...[
+              const SizedBox(height: 14),
+              FilledButton.icon(
+                onPressed: () => onJumpToNextFree!(jumpDate),
+                icon: const Icon(Icons.event_available, size: 16),
+                label: Text('Show $jumpLabel'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.red,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
+            ],
             if (seatBandLabel != null && onClearSeats != null) ...[
               const SizedBox(height: 14),
               OutlinedButton.icon(

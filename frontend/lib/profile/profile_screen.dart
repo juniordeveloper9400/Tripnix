@@ -143,8 +143,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             _tile(
               icon: Icons.my_location,
-              title: 'Live Location',
-              subtitle: 'Share where a bus is so your office and owner can see it',
+              title: 'Location',
+              subtitle: 'Share where you are so your office and owner can see it',
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const LiveLocationScreen()),
               ),

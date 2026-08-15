@@ -1,4 +1,4 @@
-import { renderFleetMap, renderBusMiniMap, fleetForDisplay, placeOf } from '../shared/fleet-map.js';
+import { renderFleetMap, renderPersonMiniMap, fleetForDisplay, placeOf } from '../shared/fleet-map.js';
 
 const API_BASE = window.location.origin.includes('3005')
   ? 'http://localhost:3000/api'
@@ -257,7 +257,7 @@ function switchTab(tabId) {
     trips:     ['Trips',                  'Post trips that appear in the traveller app story bar'],
     schedule:  ['Bus Diary',              'The running schedule for each bus in your fleet'],
     accounts:  ['Accounts',               'What the diary earned, against what you have paid Tripnix'],
-    gps:       ['GPS Tracking',           'Where every bus last reported from'],
+    gps:       ['Location',               'Where every bus last reported from'],
     subscription: ['Subscription & Plans', 'Platform membership and the fleet plan'],
     admins:    ['Manage Travel Owners',   'Create and manage Travel Owner login credentials']
   };
@@ -550,11 +550,11 @@ function renderTracking() {
 
   // One decision for the map and the list, so they can never disagree about
   // whether these are real fixes or the sample preview.
-  const { vehicles, sample } = fleetForDisplay(t);
+  const { people, sample } = fleetForDisplay(t);
 
   // Same map the owner sees, drawn by the same shared module — the office and
-  // the owner looking at different pictures of the fleet would be worse than
-  // neither having one.
+  // the owner looking at different pictures would be worse than neither having
+  // one.
   renderFleetMap(document.getElementById('gps-map'), t, {
     noteEl: document.getElementById('gps-map-note'),
     apiKey: state.mapsApiKey
@@ -562,51 +562,49 @@ function renderTracking() {
 
   document.getElementById('gps-note').textContent = sample
     ? `Sample positions · live for ${t.staleAfterMinutes} minutes after the last fix`
-    : `${t.reporting} of ${t.total} reporting · live for ${t.staleAfterMinutes} minutes after the last fix`;
+    : `${t.reporting} of ${t.total} sharing · live for ${t.staleAfterMinutes} minutes after the last fix`;
 
-  document.getElementById('gps-list').innerHTML = vehicles.length
-    ? vehicles.map(v => {
-        const l = v.location;
+  document.getElementById('gps-list').innerHTML = people.length
+    ? people.map(p => {
+        const l = p.location;
         const badge = sample
           ? '<span class="badge-status cancelled">SAMPLE</span>'
-          : !l
-            ? '<span class="badge-status pending">NO SIGNAL</span>'
-            : l.live
-              ? '<span class="badge-status confirmed">LIVE</span>'
-              : `<span class="badge-status cancelled">${l.ageMinutes} MIN AGO</span>`;
+          : l.live
+            ? '<span class="badge-status confirmed">LIVE</span>'
+            : `<span class="badge-status cancelled">${l.ageMinutes} MIN AGO</span>`;
 
-        // Where a bus is, in words. The API names every position when it is
+        // Where somebody is, in words. The API names every position when it is
         // reported, so this row reads "Chalakudy, Thrissur" rather than a pair
         // of numbers the office would have to paste into a map to understand.
         const place = placeOf(l);
-        const where = !l
-          ? 'This bus has never reported a position'
-          : `${place ? escapeHtml(place) : 'Position received, place name not available'}` +
-            `${l.speedKph ? ' · ' + Math.round(l.speedKph) + ' km/h' : ''}`;
+        const where =
+          `${place ? escapeHtml(place) : 'Position received, place name not available'}` +
+          `${l.speedKph ? ' · ' + Math.round(l.speedKph) + ' km/h' : ''}`;
 
-        const link = l
-          ? ` · <a href="https://www.google.com/maps?q=${l.lat},${l.lng}" target="_blank" rel="noopener">Open map ↗</a>`
-          : '';
+        const link =
+          ` · <a href="https://www.google.com/maps?q=${l.lat},${l.lng}" target="_blank" rel="noopener">Open map ↗</a>`;
 
         return `
           <div class="diary-row gps-row">
             <div class="diary-row-main">
-              <strong>${escapeHtml(v.vehicleName)}</strong>
-              <code class="vehicle-number">${escapeHtml(v.vehicleNumber || '—')}</code>
+              <strong>${escapeHtml(p.name)}</strong>
+              ${p.subtitle ? `<code class="vehicle-number">${escapeHtml(p.subtitle)}</code>` : ''}
               <div class="diary-row-who">${where}${link}</div>
               <div class="diary-row-status">${badge}</div>
             </div>
-            <div class="row-map" data-bus-map="${v.vehicleId}"></div>
+            <div class="row-map" data-person-map="${escapeHtml(p.id)}"></div>
           </div>`;
       }).join('')
-    : '<p class="diary-empty">No buses in the fleet yet.</p>';
+    // Nobody sharing is a choice, not a fault, so this does not read as an
+    // error or imply anyone is missing.
+    : '<p class="diary-empty">Nobody is sharing their location right now.</p>';
 
-  // Each row gets its own small map of that bus alone — one map cannot be
-  // centred on three buses at once.
-  for (const v of vehicles) {
-    renderBusMiniMap(
-      document.querySelector(`[data-bus-map="${v.vehicleId}"]`),
-      v,
+  // Each row gets its own small map of that person alone — one map cannot be
+  // centred on three people at once.
+  for (const p of people) {
+    renderPersonMiniMap(
+      document.querySelector(`[data-person-map="${CSS.escape(p.id)}"]`),
+      p,
       { sample }
     );
   }

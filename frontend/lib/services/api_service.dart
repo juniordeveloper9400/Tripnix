@@ -178,29 +178,33 @@ class ApiService {
 
   // --- Live tracking ---
 
-  /// Reports where a vehicle is now.
+  /// Reports where the signed-in person is now.
   ///
   /// Returns the fix the API stored, which carries the place name it worked out
   /// from the coordinates — the app shows that name rather than the numbers it
-  /// just sent, so the driver sees exactly what the office sees.
-  Future<Map<String, dynamic>> reportVehicleLocation({
-    required int vehicleId,
+  /// just sent, so the person sees exactly what their office sees.
+  Future<Map<String, dynamic>> reportMyLocation({
+    required String username,
+    required String operatorName,
     required double lat,
     required double lng,
+    String displayName = '',
+    String role = '',
     double speedKph = 0,
     double heading = 0,
-    String label = '',
   }) async {
     final response = await _send(
       () => http.post(
-        Uri.parse('$baseUrl/tracking/vehicles/$vehicleId'),
+        Uri.parse('$baseUrl/tracking/people/${Uri.encodeComponent(username)}'),
         headers: _headers,
         body: json.encode({
+          'operatorName': operatorName,
+          'displayName': displayName,
+          'role': role,
           'lat': lat,
           'lng': lng,
           'speedKph': speedKph,
           'heading': heading,
-          'label': label,
         }),
       ),
     );
@@ -212,8 +216,29 @@ class ApiService {
     return body;
   }
 
-  /// Every bus in an agency's fleet with its last known position — the same
-  /// payload the admin and owner portals draw their map from.
+  /// Stops sharing and removes the last position.
+  ///
+  /// Deleting rather than letting it go stale: a position that lingers for
+  /// fifteen minutes after someone switched sharing off is the app disregarding
+  /// the decision they just made.
+  Future<void> stopSharingMyLocation(String username) async {
+    final response = await _send(
+      () => http.delete(
+        Uri.parse('$baseUrl/tracking/people/${Uri.encodeComponent(username)}'),
+        headers: _headers,
+      ),
+    );
+
+    // 204 is the success here; 404 means there was nothing stored, which is the
+    // state the caller wanted anyway.
+    if (response.statusCode != 204 && response.statusCode != 404) {
+      final body = _parseResponseMap(response, defaultError: 'Could not stop sharing');
+      throw Exception(body['error'] ?? 'Could not stop sharing');
+    }
+  }
+
+  /// Everyone in an agency who is sharing their location, with their last known
+  /// position — the same payload the admin and owner portals draw their map from.
   Future<Map<String, dynamic>> fetchTracking(String operatorName) async {
     final response = await _send(
       () => http.get(Uri.parse(

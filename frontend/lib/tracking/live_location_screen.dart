@@ -2,21 +2,18 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../agency/agency_session.dart';
-import '../models/vehicle.dart';
 import '../services/api_service.dart';
 import '../services/location_service.dart';
 import '../theme/app_colors.dart';
 
-/// Share this device's position as one of the agency's buses, and watch the
-/// whole fleet come back.
+/// Share where you are, and see who else in your agency is sharing.
 ///
-/// This is the missing half of tracking: the admin and owner portals have drawn
-/// a map for a while, but nothing ever reported a position to put on it, so
-/// they only ever showed the sample preview. A driver runs this screen on the
-/// bus and the fleet becomes real.
+/// Sharing is per person, not per bus: whoever is signed in allows location and
+/// appears on their agency's map as themselves. Nothing is reported until they
+/// switch it on, and switching it off deletes the last position rather than
+/// leaving it to go stale.
 class LiveLocationScreen extends StatefulWidget {
   const LiveLocationScreen({super.key});
 
@@ -26,37 +23,29 @@ class LiveLocationScreen extends StatefulWidget {
 
 class _LiveLocationScreenState extends State<LiveLocationScreen>
     with WidgetsBindingObserver {
-  /// The bus this phone is riding on, remembered so a driver picks it once
-  /// rather than every morning.
-  static const _vehicleKey = 'tripnix_tracking_vehicle_id';
-
-  /// A bus counts as live for 15 minutes after its last fix, so a parked one
-  /// has to speak up well inside that or it drops off the portals' map while
-  /// sitting in plain sight at the depot.
+  /// Somebody counts as live for 15 minutes after their last fix, so a person
+  /// standing still has to speak up well inside that or they drop off the
+  /// portals' map while sitting in plain sight at the depot.
   static const _heartbeat = Duration(minutes: 2);
 
-  /// The floor between two reports. Without it a bus in traffic would post on
-  /// every twitch of the GPS, which costs the driver data and tells the office
+  /// The floor between two reports. Without it a phone in a moving vehicle would
+  /// post on every twitch of the GPS, which costs data and tells the office
   /// nothing new.
   static const _minimumGap = Duration(seconds: 20);
 
-  /// How often the fleet below is re-read while this screen is open.
-  static const _fleetRefresh = Duration(seconds: 20);
+  /// How often the people list below is re-read while this screen is open.
+  static const _listRefresh = Duration(seconds: 20);
 
   final _api = ApiService.instance;
   final _location = LocationService.instance;
-
-  List<Vehicle> _vehicles = [];
-  int? _vehicleId;
-  bool _loadingVehicles = true;
-  String? _loadError;
+  final _session = AgencySession.instance;
 
   bool _sharing = false;
   LocationBlock _block = LocationBlock.none;
 
   StreamSubscription<Position>? _positions;
   Timer? _heartbeatTimer;
-  Timer? _fleetTimer;
+  Timer? _listTimer;
 
   Position? _lastPosition;
   DateTime? _lastSentAt;
@@ -67,7 +56,8 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
 
   Map<String, dynamic>? _tracking;
 
-  String get _operatorName => AgencySession.instance.operatorName;
+  String get _operatorName => _session.operatorName;
+  String get _username => _session.username;
 
   @override
   void initState() {
@@ -79,8 +69,8 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _stopSharing(silent: true);
-    _fleetTimer?.cancel();
+    _stopStream();
+    _listTimer?.cancel();
     super.dispose();
   }
 
@@ -95,18 +85,18 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
 
     // Dart timers do not run while the app is suspended, so the heartbeat may
     // have missed its turn — on iOS it certainly has. Reporting on resume means
-    // the worst case is a gap while the phone was asleep, not a bus that stayed
-    // stale after the driver picked the phone back up.
+    // the worst case is a gap while the phone was asleep, not a position that
+    // stayed stale after its owner picked the phone back up.
     final last = _lastPosition;
     if (_sharing && last != null) _send(last, heartbeat: true);
 
-    _loadFleet();
+    _loadPeople();
   }
 
   Future<void> _bootstrap() async {
-    await Future.wait([_loadVehicles(), _refreshBlock()]);
-    await _loadFleet();
-    _fleetTimer = Timer.periodic(_fleetRefresh, (_) => _loadFleet());
+    await _refreshBlock();
+    await _loadPeople();
+    _listTimer = Timer.periodic(_listRefresh, (_) => _loadPeople());
   }
 
   Future<void> _refreshBlock() async {
@@ -117,67 +107,31 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
     // Location switched off underneath a running share means the fixes have
     // already stopped; saying so beats a toggle that claims to be on.
     if (_sharing && block != LocationBlock.none) {
-      _stopSharing();
+      await _stopSharing();
+      if (!mounted) return;
       setState(() => _shareError = LocationService.messageFor(block));
     }
   }
 
-  Future<void> _loadVehicles() async {
-    try {
-      final vehicles = await _api.fetchMyListedVehicles(_operatorName);
-
-      // Storage being unavailable should cost the driver a remembered choice,
-      // not the screen — so it is read separately from the fleet it annotates.
-      int? remembered;
-      try {
-        remembered = (await SharedPreferences.getInstance()).getInt(_vehicleKey);
-      } catch (_) {}
-
-      if (!mounted) return;
-      setState(() {
-        _vehicles = vehicles;
-        _vehicleId = vehicles.any((v) => v.id == remembered)
-            ? remembered
-            : (vehicles.isEmpty ? null : vehicles.first.id);
-        _loadingVehicles = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _loadError = _clean(e);
-        _loadingVehicles = false;
-      });
-    }
-  }
-
-  Future<void> _rememberVehicle(int id) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt(_vehicleKey, id);
-    } catch (_) {}
-  }
-
-  Future<void> _loadFleet() async {
+  Future<void> _loadPeople() async {
     if (_operatorName.isEmpty) return;
     try {
       final tracking = await _api.fetchTracking(_operatorName);
       if (!mounted) return;
       setState(() => _tracking = tracking);
     } catch (_) {
-      // The fleet list is a bonus on this screen; a failed refresh keeps the
-      // last one rather than replacing it with an error the driver cannot act
-      // on while driving.
+      // The people list is a bonus on this screen; a failed refresh keeps the
+      // last one rather than replacing it with an error nobody can act on.
     }
   }
 
-  // ─── Sharing ─────────────────────────────────────────────
+  // ─── Permission ──────────────────────────────────────────
 
   /// Raises the browser's or the OS's permission prompt on its own.
   ///
-  /// Separate from [_startSharing] because granting location and starting to
-  /// broadcast are different decisions, and only the first one has to be
-  /// possible before a bus has been picked. Nothing is reported here — the
-  /// answer only unlocks the share button.
+  /// Separate from [_startSharing] because allowing location and broadcasting
+  /// it are different decisions — someone may well want to grant the permission
+  /// without switching sharing on in the same tap.
   Future<void> _askForLocation() async {
     setState(() {
       _asking = true;
@@ -193,8 +147,13 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
     });
   }
 
+  // ─── Sharing ─────────────────────────────────────────────
+
   Future<void> _startSharing() async {
-    if (_vehicleId == null) return;
+    if (_username.isEmpty || _operatorName.isEmpty) {
+      setState(() => _shareError = 'Sign in again before sharing your location.');
+      return;
+    }
 
     setState(() {
       _shareError = null;
@@ -219,9 +178,9 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
     });
 
     try {
-      // Sent before the stream is wired up so the office sees the bus straight
-      // away — the stream's distance filter means a stationary bus would
-      // otherwise emit nothing at all.
+      // Sent before the stream is wired up so the office sees the person
+      // straight away — the stream's distance filter means somebody standing
+      // still would otherwise emit nothing at all.
       final first = await _location.currentPosition();
       await _send(first);
     } catch (e) {
@@ -245,22 +204,46 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
       },
     );
 
-    // The filtered stream goes silent when the bus is parked, which the portals
-    // cannot tell apart from a phone that has been switched off. This keeps the
-    // last known position current so a parked bus reads as parked, not missing.
+    // The filtered stream goes silent when somebody stops moving, which the
+    // portals cannot tell apart from a phone that has been switched off. This
+    // keeps the last known position current so a stationary person reads as
+    // stationary, not missing.
     _heartbeatTimer = Timer.periodic(_heartbeat, (_) {
       final last = _lastPosition;
       if (last != null) _send(last, heartbeat: true);
     });
   }
 
-  void _stopSharing({bool silent = false}) {
+  /// Tears down the stream and the heartbeat without touching the server.
+  void _stopStream() {
     _positions?.cancel();
     _positions = null;
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
-    if (silent || !mounted) return;
-    setState(() => _sharing = false);
+  }
+
+  Future<void> _stopSharing() async {
+    _stopStream();
+    if (mounted) {
+      setState(() {
+        _sharing = false;
+        _placeName = '';
+        _lastSentAt = null;
+      });
+    }
+    _lastPosition = null;
+
+    // The stored position goes with it. Leaving it to expire would keep the
+    // person on their agency's map for another fifteen minutes after they
+    // deliberately switched sharing off.
+    if (_username.isEmpty) return;
+    try {
+      await _api.stopSharingMyLocation(_username);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _shareError = _clean(e));
+    }
+    await _loadPeople();
   }
 
   /// Posts a fix, unless one went recently enough that this one would say the
@@ -273,12 +256,14 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
       return;
     }
 
-    final vehicleId = _vehicleId;
-    if (vehicleId == null) return;
+    if (_username.isEmpty || _operatorName.isEmpty) return;
 
     try {
-      final fix = await _api.reportVehicleLocation(
-        vehicleId: vehicleId,
+      final fix = await _api.reportMyLocation(
+        username: _username,
+        operatorName: _operatorName,
+        displayName: _session.personName,
+        role: _session.role,
         lat: position.latitude,
         lng: position.longitude,
         speedKph: speedKphOf(position),
@@ -289,15 +274,14 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
       setState(() {
         _lastSentAt = DateTime.now();
         // The API names the place from the coordinates; showing its answer
-        // rather than the numbers means the driver and the office are looking
-        // at the same words for where the bus is.
+        // rather than the numbers means the person and the office are looking
+        // at the same words for where they are.
         _placeName = (fix['place'] as String?)?.trim().isNotEmpty == true
             ? fix['place'] as String
             : (fix['placeName'] as String? ?? '');
         _shareError = null;
       });
-      // The bus that just moved is the interesting row in the list below it.
-      await _loadFleet();
+      await _loadPeople();
     } catch (e) {
       if (!mounted) return;
       setState(() => _shareError = _clean(e));
@@ -314,7 +298,7 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
     return Scaffold(
       backgroundColor: const Color(0xFFF7F7F9),
       appBar: AppBar(
-        title: const Text('Live Location',
+        title: const Text('Location',
             style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Colors.white,
         foregroundColor: AppColors.black,
@@ -323,7 +307,7 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
       body: RefreshIndicator(
         onRefresh: () async {
           await _refreshBlock();
-          await _loadFleet();
+          await _loadPeople();
         },
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -332,7 +316,7 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
             _shareCard(),
             const SizedBox(height: 20),
             const Text(
-              'YOUR FLEET',
+              'SHARING RIGHT NOW',
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w900,
@@ -341,7 +325,7 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
               ),
             ),
             const SizedBox(height: 10),
-            _fleetList(),
+            _peopleList(),
           ],
         ),
       ),
@@ -381,15 +365,15 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      _sharing ? 'Sharing this bus’s location' : 'Not sharing',
+                      _sharing ? 'Sharing your location' : 'Not sharing',
                       style: const TextStyle(
                           fontWeight: FontWeight.bold, fontSize: 15),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       _sharing
-                          ? 'Your office and owner can see this bus on their map.'
-                          : 'Turn this on while you are driving.',
+                          ? 'Your office and owner can see where you are.'
+                          : 'Turn this on to let your agency see where you are.',
                       style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                     ),
                   ],
@@ -397,8 +381,6 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
               ),
             ],
           ),
-          const SizedBox(height: 16),
-          _vehiclePicker(),
           if (_block != LocationBlock.none) ...[
             const SizedBox(height: 14),
             _permissionNotice(),
@@ -433,8 +415,7 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
                     ),
                   )
                 : ElevatedButton.icon(
-                    onPressed:
-                        _vehicleId == null || _sending ? null : _startSharing,
+                    onPressed: _sending ? null : _startSharing,
                     icon: _sending
                         ? const SizedBox(
                             width: 17,
@@ -444,7 +425,7 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
                           )
                         : const Icon(Icons.near_me, size: 19),
                     label: Text(
-                      _sending ? 'Getting your position…' : 'Share live location',
+                      _sending ? 'Getting your position…' : 'Share my location',
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                     style: ElevatedButton.styleFrom(
@@ -460,73 +441,9 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
     );
   }
 
-  Widget _vehiclePicker() {
-    if (_loadingVehicles) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 8),
-        child: LinearProgressIndicator(minHeight: 3),
-      );
-    }
-
-    if (_loadError != null) {
-      return _notice(
-        icon: Icons.cloud_off,
-        colour: AppColors.red,
-        message: _loadError!,
-      );
-    }
-
-    if (_vehicles.isEmpty) {
-      return _notice(
-        icon: Icons.directions_bus_outlined,
-        colour: Colors.orange.shade800,
-        message: 'No listed buses on this account yet. Add and subscribe a bus '
-            'in the owner portal, then it can be tracked here.',
-      );
-    }
-
-    return InputDecorator(
-      decoration: InputDecoration(
-        labelText: 'Which bus is this phone on?',
-        labelStyle: const TextStyle(fontSize: 13),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<int>(
-          isExpanded: true,
-          value: _vehicleId,
-          items: _vehicles
-              .map((v) => DropdownMenuItem(
-                    value: v.id,
-                    child: Text(
-                      v.vehicleNumber.isEmpty
-                          ? v.name
-                          : '${v.name} · ${v.vehicleNumber}',
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 14),
-                    ),
-                  ))
-              .toList(),
-          // Changing bus mid-share would start reporting this position as a
-          // different vehicle, putting a bus somewhere it is not.
-          onChanged: _sharing
-              ? null
-              : (id) {
-                  if (id == null) return;
-                  setState(() => _vehicleId = id);
-                  _rememberVehicle(id);
-                },
-        ),
-      ),
-    );
-  }
-
   Widget _permissionNotice() {
     // A plain refusal can still be asked about, and this button is the only
-    // thing on the screen that can raise the prompt — sharing is gated behind
-    // picking a bus, so an agency with no listed buses yet could otherwise
-    // never grant location at all.
+    // thing on the screen that raises the prompt on its own.
     final canAsk = _block == LocationBlock.denied;
 
     // Only worth offering where it goes somewhere: on the web there is no app
@@ -651,8 +568,8 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
     );
   }
 
-  Widget _fleetList() {
-    final vehicles = (_tracking?['vehicles'] as List<dynamic>?) ?? const [];
+  Widget _peopleList() {
+    final people = (_tracking?['people'] as List<dynamic>?) ?? const [];
 
     if (_tracking == null) {
       return const Padding(
@@ -661,41 +578,41 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
       );
     }
 
-    if (vehicles.isEmpty) {
+    if (people.isEmpty) {
       return _notice(
-        icon: Icons.directions_bus_outlined,
+        icon: Icons.person_off_outlined,
         colour: Colors.grey.shade700,
-        message: 'No buses in this fleet yet.',
+        // Nobody sharing is a choice, not a fault, so this does not read as an
+        // error or imply anyone is missing.
+        message: 'Nobody in this agency is sharing their location right now.',
       );
     }
 
     return Column(
-      children: vehicles
+      children: people
           .cast<Map<String, dynamic>>()
-          .map((v) => _fleetRow(v))
+          .map((p) => _personRow(p))
           .toList(),
     );
   }
 
-  Widget _fleetRow(Map<String, dynamic> v) {
-    final location = v['location'] as Map<String, dynamic>?;
+  Widget _personRow(Map<String, dynamic> p) {
+    final location = p['location'] as Map<String, dynamic>?;
     final live = location?['live'] == true;
     final place = (location?['place'] as String?)?.trim() ?? '';
     final ageMinutes = (location?['ageMinutes'] as num?)?.round() ?? 0;
 
-    final (Color colour, String badge) = location == null
-        ? (Colors.grey, 'NO SIGNAL')
-        : live
-            ? (Colors.green, 'LIVE')
-            : (Colors.orange.shade800, '$ageMinutes MIN AGO');
+    final (Color colour, String badge) =
+        live ? (Colors.green, 'LIVE') : (Colors.orange.shade800, '$ageMinutes MIN AGO');
 
-    final where = location == null
-        ? 'This bus has never reported a position'
-        : place.isEmpty
-            // Only when the geocoder could not name the spot — an honest gap
-            // rather than falling back to a pair of numbers nobody can read.
-            ? 'Position received, place name not available'
-            : place;
+    final where = place.isEmpty
+        // Only when the geocoder could not name the spot — an honest gap rather
+        // than falling back to a pair of numbers nobody can read.
+        ? 'Position received, place name not available'
+        : place;
+
+    final isMe = (p['id'] as String?) == _username;
+    final role = (p['subtitle'] as String?)?.trim() ?? '';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -717,10 +634,31 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  v['vehicleName'] as String? ?? 'Bus',
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 13.5),
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        p['name'] as String? ?? 'Someone',
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 13.5),
+                      ),
+                    ),
+                    if (isMe) ...[
+                      const SizedBox(width: 6),
+                      Text(
+                        '(you)',
+                        style: TextStyle(fontSize: 11.5, color: Colors.grey[600]),
+                      ),
+                    ],
+                    if (role.isNotEmpty) ...[
+                      const SizedBox(width: 6),
+                      Text(
+                        '· $role',
+                        style: TextStyle(fontSize: 11.5, color: Colors.grey[600]),
+                      ),
+                    ],
+                  ],
                 ),
                 const SizedBox(height: 2),
                 Text(

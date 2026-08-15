@@ -23,6 +23,17 @@ class AgencySession {
   String get username => _agency?['username'] as String? ?? '';
   bool get isSignedIn => _agency != null;
 
+  /// The person behind the account, for anywhere a human is named rather than
+  /// the agency. Falls back to the username so this is never blank — an account
+  /// created without an owner name still reads as somebody.
+  String get personName {
+    final name = (_agency?['ownerName'] as String? ?? '').trim();
+    return name.isEmpty ? username : name;
+  }
+
+  /// owner / admin / staff / superadmin, as the API reports it.
+  String get role => _agency?['role'] as String? ?? '';
+
   /// The Super Admin isn't a paying agency, so it bypasses the fee check.
   bool get isSuperAdmin => _agency?['role'] == 'superadmin';
 
