@@ -9,8 +9,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/dark.css">
-  <script type="module" crossorigin src="/admin/assets/index-CWMSxou5.js"></script>
-  <link rel="stylesheet" crossorigin href="/admin/assets/index-C00t7mrp.css">
+  <script type="module" crossorigin src="/admin/assets/index-DO9JYklk.js"></script>
+  <link rel="stylesheet" crossorigin href="/admin/assets/index-BQUuxu1y.css">
 </head>
 <body>
 
@@ -793,12 +793,18 @@
 
         <div class="form-row">
           <div class="form-group flex-1">
-            <label for="acc-entry-vehicle">Bus <span id="acc-entry-vehicle-req"></span></label>
-            <select id="acc-entry-vehicle"></select>
+            <label id="acc-entry-vehicle-label">Bus <span id="acc-entry-vehicle-req"></span></label>
+            <!-- A custom dropdown rather than a <select>: a native one opens an
+                 OS-drawn popup that is positioned outside the page entirely and
+                 no CSS can keep it inside the form. This one is an element in
+                 the modal, so it stays put and scrolls within itself. -->
+            <div class="dd" id="acc-entry-vehicle-dd" data-labelled-by="acc-entry-vehicle-label"></div>
+            <input type="hidden" id="acc-entry-vehicle" />
           </div>
           <div class="form-group flex-1">
-            <label for="acc-entry-category">Category</label>
-            <select id="acc-entry-category"></select>
+            <label id="acc-entry-category-label">Category</label>
+            <div class="dd" id="acc-entry-category-dd" data-labelled-by="acc-entry-category-label"></div>
+            <input type="hidden" id="acc-entry-category" />
           </div>
         </div>
 
