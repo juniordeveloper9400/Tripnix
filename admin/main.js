@@ -308,9 +308,19 @@ async function loadAccounts(month) {
 
 // ─── Adding to the books ───────────────────────────────────
 
-function openAccEntryModal() {
+async function openAccEntryModal() {
   if (!state.vehicles.length) {
     return alert('❌ Add a bus to your fleet first.');
+  }
+
+  // The categories arrive with the accounts tab, so opening this form by any
+  // other route left the dropdown empty and the entry filed as whatever the
+  // browser picked. Fetched here when missing rather than assumed.
+  if (!state.accountCategories) {
+    try {
+      const res = await fetch(`${API_BASE}/accounts/categories`);
+      if (res.ok) state.accountCategories = await res.json();
+    } catch { /* the fallback list below still fills the dropdown */ }
   }
   document.getElementById('acc-entry-date').value = new Date().toISOString().slice(0, 10);
   document.getElementById('acc-entry-amount').value = '';
@@ -325,12 +335,31 @@ function closeAccEntryModal() {
   document.getElementById('acc-entry-form').reset();
 }
 
+/// Builds the category dropdown, grouped under headings.
+///
+/// An agency's expenses run to thirty-odd kinds once office and staff costs are
+/// included, and a flat list that long is a scroll rather than a choice. The
+/// headings let someone go straight to the part of the business they are filing
+/// against. Falls back to the flat list when the API is an older one that does
+/// not send groups.
+function categoryOptionsHtml(cats, groups) {
+  if (Array.isArray(groups) && groups.length) {
+    return groups.map(g =>
+      `<optgroup label="${escapeHtml(g.group)}">` +
+      (g.items || []).map(c => `<option>${escapeHtml(c)}</option>`).join('') +
+      `</optgroup>`
+    ).join('');
+  }
+  return (cats || []).map(c => `<option>${escapeHtml(c)}</option>`).join('');
+}
+
 /// Keeps the form honest about what each kind needs: capital belongs to one
 /// bus, the other two may sit against the agency as a whole.
 function syncAccEntryKind(kind) {
-  const cats = state.accountCategories?.categories?.[kind] || [];
-  document.getElementById('acc-entry-category').innerHTML =
-    cats.map(c => `<option>${escapeHtml(c)}</option>`).join('');
+  document.getElementById('acc-entry-category').innerHTML = categoryOptionsHtml(
+    state.accountCategories?.categories?.[kind],
+    state.accountCategories?.groups?.[kind]
+  );
 
   const options = state.vehicles.map(v =>
     `<option value="${v.id}">${escapeHtml(v.name)} · ${escapeHtml(v.vehicleNumber || '—')}</option>`);
@@ -343,7 +372,7 @@ function syncAccEntryKind(kind) {
     ? 'What the bus cost to buy. Recorded once, not as a monthly expense — it is the sum the bus has to earn back.'
     : kind === 'income'
       ? 'Money in that is not already a diary order — a private contract, a rental, anything else.'
-      : 'Money out: fuel, driver wages, servicing, insurance, an EMI. Leave the bus blank for costs that cover the whole agency.';
+      : 'Money out — running the bus, staff, office rent, compliance, finance. Leave the bus blank for costs that cover the whole agency.';
 }
 
 async function handleAccEntrySubmit(e) {

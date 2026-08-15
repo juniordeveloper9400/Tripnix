@@ -23,11 +23,97 @@ const router = Router();
 /// bus has to earn back, which is why it is counted separately from both.
 const KINDS = ["capital", "income", "expense"];
 
-const CATEGORIES = {
-  capital: ["Vehicle purchase", "Down payment", "Body work", "Permit & registration", "Other"],
-  income: ["Trip income", "Rental", "Contract", "Other"],
-  expense: ["Fuel", "Driver wages", "Maintenance", "Insurance", "Road tax", "Loan EMI", "Parking & tolls", "Other"]
+/// What each kind offers, grouped the way an agency actually thinks about its
+/// books.
+///
+/// A travel agency's costs are not all vehicle costs. Running a bus is fuel,
+/// tyres and servicing; running the agency that owns it is rent, salaries,
+/// electricity and an accountant — and an office that could only file the first
+/// kind either left the rest out of its books or filed them under "Other",
+/// which is the same as leaving them out once anyone tries to read the report.
+///
+/// Every category that existed before is still here, spelled exactly as it was.
+/// Renaming one would split an agency's history in two: last year's diesel under
+/// "Fuel" and this year's under something else, with no report able to add them
+/// up.
+const CATEGORY_GROUPS = {
+  capital: [
+    {
+      group: "Vehicle",
+      items: ["Vehicle purchase", "Down payment", "Body work", "Seats & interior", "Air conditioning"]
+    },
+    {
+      group: "Setting up",
+      items: ["Permit & registration", "Office premises", "Office furniture & equipment"]
+    },
+    { group: "Other", items: ["Other"] }
+  ],
+  income: [
+    {
+      group: "Trips",
+      items: ["Trip income", "Package tour", "Contract", "Rental"]
+    },
+    {
+      group: "Other earnings",
+      items: ["Advertising on bus", "Commission received", "Other"]
+    }
+  ],
+  expense: [
+    {
+      group: "Running the bus",
+      items: ["Fuel", "Maintenance", "Spare parts", "Tyres", "Parking & tolls", "Cleaning & washing"]
+    },
+    {
+      group: "Staff",
+      items: [
+        "Driver wages",
+        "Cleaner & helper wages",
+        "Office staff salary",
+        "Staff food & allowance",
+        "Bonus & incentive"
+      ]
+    },
+    {
+      group: "Office & premises",
+      items: [
+        "Building rent",
+        "Electricity & water",
+        "Phone & internet",
+        "Office supplies",
+        "Software & subscriptions"
+      ]
+    },
+    {
+      group: "Legal & compliance",
+      items: [
+        "Insurance",
+        "Road tax",
+        "Permit renewal",
+        "Fitness certificate",
+        "Pollution certificate",
+        "Fine & penalty"
+      ]
+    },
+    {
+      group: "Finance",
+      items: ["Loan EMI", "Interest paid", "Bank charges"]
+    },
+    {
+      group: "Other",
+      items: ["Marketing & advertising", "Agent commission", "Legal & professional fees", "Other"]
+    }
+  ]
 };
+
+/// The same lists, flattened. Kept because an entry stores a plain category
+/// string and every read path compares against one — the grouping is a way to
+/// present the choice, not a change to what is recorded.
+const CATEGORIES = Object.fromEntries(
+  Object.entries(CATEGORY_GROUPS).map(([kind, groups]) => [
+    kind,
+    groups.flatMap((g) => g.items)
+  ])
+);
 
 // Manual entries for this process. The database is the store.
 let ledger = [];
@@ -109,8 +195,13 @@ function performanceBand({ income, expense, capital, recoveredPct }) {
 // ─── Entries ───────────────────────────────────────────────
 
 // GET /api/accounts/categories - what the forms offer
+//
+// `categories` is the flat list every existing caller already reads; `groups`
+// carries the same items with their headings, for a form that wants to show
+// them grouped. Serving both means a portal that has not been rebuilt keeps
+// working unchanged.
 router.get("/categories", (req, res) => {
-  res.json({ kinds: KINDS, categories: CATEGORIES });
+  res.json({ kinds: KINDS, categories: CATEGORIES, groups: CATEGORY_GROUPS });
 });
 
 // GET /api/accounts/entries?operatorName=...

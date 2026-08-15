@@ -817,12 +817,31 @@ function closeEntryModal() {
   document.getElementById('entry-modal').classList.add('hidden');
 }
 
+/// Builds the category dropdown, grouped under headings.
+///
+/// An agency's expenses run to thirty-odd kinds once office and staff costs are
+/// included, and a flat list that long is a scroll rather than a choice. The
+/// headings let someone go straight to the part of the business they are filing
+/// against. Falls back to the flat list when the API is an older one that does
+/// not send groups.
+function categoryOptionsHtml(cats, groups) {
+  if (Array.isArray(groups) && groups.length) {
+    return groups.map(g =>
+      `<optgroup label="${escapeHtml(g.group)}">` +
+      (g.items || []).map(c => `<option>${escapeHtml(c)}</option>`).join('') +
+      `</optgroup>`
+    ).join('');
+  }
+  return (cats || []).map(c => `<option>${escapeHtml(c)}</option>`).join('');
+}
+
 /// Keeps the form honest about what each kind needs: capital belongs to one
 /// bus, the other two may sit against the agency as a whole.
 function syncEntryKind(kind) {
-  const cats = state.categories?.categories?.[kind] || [];
-  document.getElementById('entry-category').innerHTML =
-    cats.map(c => `<option>${escapeHtml(c)}</option>`).join('');
+  document.getElementById('entry-category').innerHTML = categoryOptionsHtml(
+    state.categories?.categories?.[kind],
+    state.categories?.groups?.[kind]
+  );
 
   const select = document.getElementById('entry-vehicle');
   const options = (state.vehicles || []).map(v =>
@@ -836,7 +855,7 @@ function syncEntryKind(kind) {
     ? 'What the bus cost to buy. Recorded once, not as a monthly expense — it is the sum the bus has to earn back.'
     : kind === 'income'
       ? 'Money in that is not already a diary order — a private contract, a rental, anything else.'
-      : 'Money out: fuel, wages, servicing, insurance, an EMI. Leave the bus blank for costs that cover the whole agency.';
+      : 'Money out — running the bus, staff, office rent, compliance, finance. Leave the bus blank for costs that cover the whole agency.';
 }
 
 async function handleEntrySubmit(e) {
