@@ -12,10 +12,11 @@ import '../../tracking/live_location_screen.dart';
 /// wanted their location at all and no way to offer it. This puts the request
 /// where it is seen.
 ///
-/// It shows nothing at all when there is nobody signed in to file a position
-/// under, when the browser has already been asked and refused for good, or once
-/// sharing is running — a banner that stayed up after being acted on would just
-/// be noise on every screen.
+/// It stays put whatever is standing in the way. An earlier version hid itself
+/// when the browser had blocked location or the device's location was switched
+/// off — which is precisely when somebody needs to be told how to turn it back
+/// on. The bar changes what it says and what its button does instead of
+/// disappearing at the moment it becomes useful.
 class LocationPromptBar extends StatefulWidget {
   const LocationPromptBar({super.key});
 
@@ -23,8 +24,18 @@ class LocationPromptBar extends StatefulWidget {
   State<LocationPromptBar> createState() => _LocationPromptBarState();
 }
 
-class _LocationPromptBarState extends State<LocationPromptBar> {
+/// What the bar should say, and what its button should do about it.
+typedef _Prompt = ({
+  IconData icon,
+  String title,
+  String message,
+  String action,
+});
+
+class _LocationPromptBarState extends State<LocationPromptBar>
+    with WidgetsBindingObserver {
   final _sharing = LocationSharing.instance;
+  final _location = LocationService.instance;
 
   /// Dismissed for this run only. Not persisted: the point of the bar is that
   /// the office can ask someone to turn sharing on and they can find it, and a
@@ -34,7 +45,113 @@ class _LocationPromptBarState extends State<LocationPromptBar> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _sharing.refreshBlock();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Someone sent to the settings app to switch location on comes back to this
+    // screen; without re-reading, the bar would still be telling them to do the
+    // thing they have just done.
+    if (state == AppLifecycleState.resumed) _sharing.refreshBlock();
+  }
+
+  _Prompt _promptFor(LocationBlock block) {
+    switch (block) {
+      case LocationBlock.serviceDisabled:
+        return (
+          icon: Icons.location_off_outlined,
+          title: 'Location is switched off',
+          message: 'Turn location on for this device so your agency can see '
+              'where you are.',
+          action: 'Turn on',
+        );
+
+      case LocationBlock.deniedForever:
+        return (
+          icon: Icons.lock_outline,
+          title: 'Location is blocked',
+          message: _location.canOpenSettings
+              ? 'Tripnix was refused location access. Allow it in settings to '
+                  'share where you are.'
+              // No settings page to send a browser user to, so the bar names the
+              // control they actually have to use rather than a button it cannot
+              // provide.
+              : 'This browser is blocking location for Tripnix. Allow it from '
+                  'the padlock in the address bar, then reload.',
+          action: _location.canOpenSettings ? 'Settings' : 'How to fix',
+        );
+
+      case LocationBlock.insecureOrigin:
+        return (
+          icon: Icons.gpp_maybe_outlined,
+          title: 'Location needs a secure connection',
+          message: 'Browsers only give location to sites on https. Open Tripnix '
+              'over https to share where you are.',
+          action: 'Details',
+        );
+
+      case LocationBlock.denied:
+      case LocationBlock.none:
+        return (
+          icon: Icons.near_me_outlined,
+          title: 'Share your location',
+          message: 'Let your office and owner see where you are while you are '
+              'working.',
+          action: 'Allow',
+        );
+    }
+  }
+
+  /// Everything the one-tap path cannot resolve is explained properly on the
+  /// Location screen rather than in a sentence squeezed into a banner.
+  Future<void> _openLocationScreen() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const LiveLocationScreen()),
+    );
+    if (mounted) _sharing.refreshBlock();
+  }
+
+  Future<void> _act(LocationBlock block) async {
+    switch (block) {
+      case LocationBlock.serviceDisabled:
+        // Straight to the device's own switch, which is the only thing that can
+        // undo this. On the web there is no such switch, so the screen explains.
+        if (_location.canOpenSettings) {
+          await _location.openLocationSettings();
+        } else {
+          await _openLocationScreen();
+        }
+
+      case LocationBlock.deniedForever:
+        if (_location.canOpenSettings) {
+          await _location.openSettings();
+        } else {
+          await _openLocationScreen();
+        }
+
+      case LocationBlock.insecureOrigin:
+        await _openLocationScreen();
+
+      case LocationBlock.denied:
+      case LocationBlock.none:
+        // One tap does the whole thing: raises the permission prompt and, once
+        // it is granted, starts reporting. Asking someone to allow location and
+        // then hunt for a second button to actually share is how a position
+        // never reaches the office.
+        await _sharing.start();
+        if (!mounted) return;
+        if (!_sharing.sharing && _sharing.block != LocationBlock.none) {
+          await _openLocationScreen();
+        }
+    }
   }
 
   @override
@@ -44,18 +161,16 @@ class _LocationPromptBarState extends State<LocationPromptBar> {
       builder: (context, _) {
         if (_dismissed) return const SizedBox.shrink();
 
-        // Nothing to file a position under.
+        // Nothing to file a position under — a signed-out visitor has no
+        // account for a position to belong to.
         if (!_sharing.canShare) return const SizedBox.shrink();
 
-        // Already reporting — the Location screen is where it is managed.
+        // Already reporting; the Location screen is where it is managed.
         if (_sharing.sharing) return const SizedBox.shrink();
 
-        // Refused for good, or the page is on an insecure origin: neither can be
-        // fixed by a button here, and the Location screen explains both properly.
-        if (_sharing.block == LocationBlock.deniedForever ||
-            _sharing.block == LocationBlock.insecureOrigin) {
-          return const SizedBox.shrink();
-        }
+        final block = _sharing.block;
+        final prompt = _promptFor(block);
+        final busy = _sharing.starting || _sharing.asking;
 
         return Padding(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
@@ -68,22 +183,20 @@ class _LocationPromptBarState extends State<LocationPromptBar> {
             ),
             child: Row(
               children: [
-                const Icon(Icons.near_me_outlined,
-                    size: 20, color: AppColors.red),
+                Icon(prompt.icon, size: 20, color: AppColors.red),
                 const SizedBox(width: 11),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'Share your location',
-                        style: TextStyle(
+                      Text(
+                        prompt.title,
+                        style: const TextStyle(
                             fontWeight: FontWeight.bold, fontSize: 13.5),
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        'Let your office and owner see where you are while you '
-                        'are working.',
+                        prompt.message,
                         style: TextStyle(
                             fontSize: 11.5,
                             height: 1.35,
@@ -93,7 +206,29 @@ class _LocationPromptBarState extends State<LocationPromptBar> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                _action(),
+                FilledButton(
+                  onPressed: busy ? null : () => _act(block),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.red,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    minimumSize: const Size(0, 36),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                  child: busy
+                      ? const SizedBox(
+                          width: 15,
+                          height: 15,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
+                        )
+                      : Text(
+                          prompt.action,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 12.5),
+                        ),
+                ),
                 IconButton(
                   onPressed: () => setState(() => _dismissed = true),
                   icon: const Icon(Icons.close, size: 17),
@@ -106,49 +241,6 @@ class _LocationPromptBarState extends State<LocationPromptBar> {
           ),
         );
       },
-    );
-  }
-
-  Widget _action() {
-    final busy = _sharing.starting || _sharing.asking;
-
-    return FilledButton(
-      // One tap does the whole thing: raises the permission prompt and, once
-      // it is granted, starts reporting. Asking someone to allow location and
-      // then hunt for a second button to actually share is how a position never
-      // reaches the office.
-      onPressed: busy
-          ? null
-          : () async {
-              await _sharing.start();
-              if (!mounted) return;
-
-              // Anything the one-tap path cannot resolve — a refusal, an
-              // insecure origin, location switched off on the device — has a
-              // proper explanation on the Location screen rather than a
-              // sentence squeezed into a banner.
-              if (!_sharing.sharing && _sharing.block != LocationBlock.none) {
-                await Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const LiveLocationScreen()),
-                );
-              }
-            },
-      style: FilledButton.styleFrom(
-        backgroundColor: AppColors.red,
-        foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(horizontal: 14),
-        minimumSize: const Size(0, 36),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
-      child: busy
-          ? const SizedBox(
-              width: 15,
-              height: 15,
-              child: CircularProgressIndicator(
-                  strokeWidth: 2, color: Colors.white),
-            )
-          : const Text('Allow',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
     );
   }
 }
