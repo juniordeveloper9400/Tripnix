@@ -828,6 +828,111 @@ select {
   text-overflow: ellipsis;
 }
 
+/* ─── Dropdown ─────────────────────────────────────────────
+   Replaces <select> where the list has to stay inside the form. A native
+   select's list is drawn by the operating system against the screen, not the
+   page, so it opened over the modal and ran off its edge with no way to
+   restrain it. This is an ordinary element in the modal instead. */
+.dd {
+  position: relative;
+  min-width: 0;
+}
+
+.dd-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: white;
+  font-size: 14px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dd-trigger:hover { border-color: var(--text-muted); }
+.dd.is-open .dd-trigger { border-color: var(--accent-red); }
+
+/* The label takes the room and truncates; the caret keeps its own. Without the
+   min-width:0 the flex child refuses to shrink and the caret is pushed out. */
+.dd-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dd-label.is-placeholder { color: var(--text-muted); }
+
+.dd-caret {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  transition: transform 0.15s;
+}
+
+.dd.is-open .dd-caret { transform: rotate(180deg); }
+
+.dd-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 5px);
+  z-index: 20;
+  /* Scrolls within itself: twenty-nine expense categories will not fit on
+     screen, and a panel that simply grew would be clipped by the modal. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 5px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.55);
+}
+
+/* Flipped above the field when there is no room below it. */
+.dd.opens-up .dd-panel {
+  top: auto;
+  bottom: calc(100% + 5px);
+}
+
+.dd-panel[hidden] { display: none; }
+
+.dd-group-label {
+  padding: 8px 10px 4px;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.dd-option {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: white;
+  font-size: 13.5px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dd-option:hover { background-color: var(--bg-primary); }
+
+.dd-option.is-on {
+  background-color: var(--accent-red);
+  font-weight: 700;
+}
+
 input:focus, select:focus, textarea:focus {
   outline: none;
   border-color: var(--accent-red);

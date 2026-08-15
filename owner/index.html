@@ -296,12 +296,17 @@
 
         <div class="form-row">
           <div class="form-group">
-            <label for="entry-vehicle">Bus <span id="entry-vehicle-req"></span></label>
-            <select id="entry-vehicle" class="month-select"></select>
+            <label>Bus <span id="entry-vehicle-req"></span></label>
+            <!-- A custom dropdown rather than a <select>: a native one opens an
+                 OS-drawn popup positioned outside the page, which escaped the
+                 form. This one is an element in the modal. -->
+            <div class="dd" id="entry-vehicle-dd"></div>
+            <input type="hidden" id="entry-vehicle" />
           </div>
           <div class="form-group">
-            <label for="entry-category">Category</label>
-            <select id="entry-category" class="month-select"></select>
+            <label>Category</label>
+            <div class="dd" id="entry-category-dd"></div>
+            <input type="hidden" id="entry-category" />
           </div>
         </div>
 

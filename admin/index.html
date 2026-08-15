@@ -792,12 +792,18 @@
 
         <div class="form-row">
           <div class="form-group flex-1">
-            <label for="acc-entry-vehicle">Bus <span id="acc-entry-vehicle-req"></span></label>
-            <select id="acc-entry-vehicle"></select>
+            <label id="acc-entry-vehicle-label">Bus <span id="acc-entry-vehicle-req"></span></label>
+            <!-- A custom dropdown rather than a <select>: a native one opens an
+                 OS-drawn popup that is positioned outside the page entirely and
+                 no CSS can keep it inside the form. This one is an element in
+                 the modal, so it stays put and scrolls within itself. -->
+            <div class="dd" id="acc-entry-vehicle-dd" data-labelled-by="acc-entry-vehicle-label"></div>
+            <input type="hidden" id="acc-entry-vehicle" />
           </div>
           <div class="form-group flex-1">
-            <label for="acc-entry-category">Category</label>
-            <select id="acc-entry-category"></select>
+            <label id="acc-entry-category-label">Category</label>
+            <div class="dd" id="acc-entry-category-dd" data-labelled-by="acc-entry-category-label"></div>
+            <input type="hidden" id="acc-entry-category" />
           </div>
         </div>
 

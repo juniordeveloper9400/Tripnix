@@ -817,38 +817,186 @@ function closeEntryModal() {
   document.getElementById('entry-modal').classList.add('hidden');
 }
 
-/// Builds the category dropdown, grouped under headings.
+// ─── Dropdown ──────────────────────────────────────────────
+//
+// A dropdown that stays inside the form.
+//
+// A native <select> hands its list to the operating system, which draws it as a
+// popup positioned against the screen rather than the page — it opened over the
+// top of the modal and ran off the edge of it, and no amount of CSS could pull
+// it back, because the popup is not part of the document at all. This is an
+// ordinary element in the modal instead: it sits under its field, scrolls
+// within itself when the list is long, and cannot escape the form.
+//
+// The chosen value is mirrored into a hidden input carrying the id the form
+// already reads, so submitting is unchanged.
+
+const DD_MAX_PANEL_PX = 240;
+
+/// Fills a dropdown and selects a value.
 ///
-/// An agency's expenses run to thirty-odd kinds once office and staff costs are
-/// included, and a flat list that long is a scroll rather than a choice. The
-/// headings let someone go straight to the part of the business they are filing
-/// against. Falls back to the flat list when the API is an older one that does
-/// not send groups.
-function categoryOptionsHtml(cats, groups) {
-  if (Array.isArray(groups) && groups.length) {
-    return groups.map(g =>
-      `<optgroup label="${escapeHtml(g.group)}">` +
-      (g.items || []).map(c => `<option>${escapeHtml(c)}</option>`).join('') +
-      `</optgroup>`
-    ).join('');
-  }
-  return (cats || []).map(c => `<option>${escapeHtml(c)}</option>`).join('');
+/// `groups` is [{ group, items }]; `flat` is the ungrouped fallback for an API
+/// that predates grouping.
+function setDropdown(hostId, { groups, flat, value, placeholder = 'Select…' }) {
+  const host = document.getElementById(hostId);
+  if (!host) return;
+
+  const items = Array.isArray(groups) && groups.length
+    ? groups.flatMap(g => (g.items || []).map(i =>
+        typeof i === 'string' ? { value: i, label: i } : i))
+    : (flat || []).map(i => (typeof i === 'string' ? { value: i, label: i } : i));
+
+  // Falls back to the first real option rather than leaving the field blank —
+  // a form that submits an empty category files the entry under nothing.
+  const chosen = items.some(i => i.value === value)
+    ? value
+    : (items[0]?.value ?? '');
+
+  host.dataset.placeholder = placeholder;
+  host._ddItems = items;
+  host._ddGroups = Array.isArray(groups) && groups.length ? groups : null;
+
+  host.innerHTML = `
+    <button type="button" class="dd-trigger" aria-haspopup="listbox" aria-expanded="false">
+      <span class="dd-label"></span>
+      <span class="dd-caret" aria-hidden="true">▾</span>
+    </button>
+    <div class="dd-panel" role="listbox" hidden></div>`;
+
+  host.querySelector('.dd-trigger').addEventListener('click', e => {
+    e.stopPropagation();
+    toggleDropdown(hostId);
+  });
+
+  selectDropdownValue(hostId, chosen);
 }
+
+function dropdownMirror(hostId) {
+  // The hidden input shares the host's id minus the -dd suffix, which is the id
+  // the submit handler already reads.
+  return document.getElementById(hostId.replace(/-dd$/, ''));
+}
+
+function selectDropdownValue(hostId, value) {
+  const host = document.getElementById(hostId);
+  if (!host) return;
+  const item = (host._ddItems || []).find(i => i.value === value);
+
+  host.dataset.value = item ? item.value : '';
+  const label = host.querySelector('.dd-label');
+  if (label) {
+    label.textContent = item ? item.label : (host.dataset.placeholder || 'Select…');
+    label.classList.toggle('is-placeholder', !item);
+  }
+
+  const mirror = dropdownMirror(hostId);
+  if (mirror) mirror.value = item ? item.value : '';
+}
+
+function renderDropdownPanel(host) {
+  const current = host.dataset.value;
+  const option = i => `
+    <button type="button" role="option" class="dd-option${i.value === current ? ' is-on' : ''}"
+            data-dd-value="${escapeHtml(i.value)}" aria-selected="${i.value === current}">
+      ${escapeHtml(i.label)}
+    </button>`;
+
+  const panel = host.querySelector('.dd-panel');
+  panel.innerHTML = host._ddGroups
+    ? host._ddGroups.map(g => `
+        <div class="dd-group-label">${escapeHtml(g.group)}</div>
+        ${(g.items || []).map(i =>
+          option(typeof i === 'string' ? { value: i, label: i } : i)).join('')}`).join('')
+    : (host._ddItems || []).map(option).join('');
+
+  panel.querySelectorAll('[data-dd-value]').forEach(btn =>
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      selectDropdownValue(host.id, btn.dataset.ddValue);
+      closeDropdowns();
+    }));
+}
+
+/// Opens above the field when there is not room below it.
+///
+/// The modal scrolls its own content, so a panel that ran past the bottom edge
+/// would be clipped by it — the list would simply stop mid-option.
+function placeDropdownPanel(host) {
+  const panel = host.querySelector('.dd-panel');
+  const trigger = host.querySelector('.dd-trigger');
+  const card = host.closest('.modal-card') || document.documentElement;
+
+  const cardBox = card.getBoundingClientRect();
+  const triggerBox = trigger.getBoundingClientRect();
+
+  const below = cardBox.bottom - triggerBox.bottom - 12;
+  const above = triggerBox.top - cardBox.top - 12;
+
+  const wantsUp = below < Math.min(DD_MAX_PANEL_PX, 160) && above > below;
+  panel.style.maxHeight = Math.max(120, Math.min(DD_MAX_PANEL_PX, wantsUp ? above : below)) + 'px';
+  host.classList.toggle('opens-up', wantsUp);
+}
+
+function toggleDropdown(hostId) {
+  const host = document.getElementById(hostId);
+  const panel = host?.querySelector('.dd-panel');
+  if (!panel) return;
+
+  const wasOpen = !panel.hidden;
+  closeDropdowns();
+  if (wasOpen) return;
+
+  renderDropdownPanel(host);
+  panel.hidden = false;
+  host.classList.add('is-open');
+  host.querySelector('.dd-trigger').setAttribute('aria-expanded', 'true');
+  placeDropdownPanel(host);
+
+  // The chosen row should be in view when a long list opens, rather than the
+  // list always starting at the top and hiding what is currently set.
+  panel.querySelector('.dd-option.is-on')?.scrollIntoView({ block: 'nearest' });
+}
+
+function closeDropdowns() {
+  document.querySelectorAll('.dd').forEach(host => {
+    const panel = host.querySelector('.dd-panel');
+    if (panel) panel.hidden = true;
+    host.classList.remove('is-open', 'opens-up');
+    host.querySelector('.dd-trigger')?.setAttribute('aria-expanded', 'false');
+  });
+}
+
+// Clicking anywhere else, or pressing Escape, puts the list away — the two
+// things anyone tries when a dropdown is open and they have changed their mind.
+document.addEventListener('click', closeDropdowns);
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeDropdowns();
+});
 
 /// Keeps the form honest about what each kind needs: capital belongs to one
 /// bus, the other two may sit against the agency as a whole.
 function syncEntryKind(kind) {
-  document.getElementById('entry-category').innerHTML = categoryOptionsHtml(
-    state.categories?.categories?.[kind],
-    state.categories?.groups?.[kind]
-  );
+  const cats = state.categories;
 
-  const select = document.getElementById('entry-vehicle');
-  const options = (state.vehicles || []).map(v =>
-    `<option value="${v.id}">${escapeHtml(v.name)} · ${escapeHtml(v.vehicleNumber || '—')}</option>`);
-  select.innerHTML = kind === 'capital'
-    ? options.join('')
-    : `<option value="">Whole agency</option>` + options.join('');
+  setDropdown('entry-category-dd', {
+    groups: cats?.groups?.[kind],
+    flat: cats?.categories?.[kind],
+    value: document.getElementById('entry-category')?.value,
+    placeholder: 'Choose a category'
+  });
+
+  const buses = (state.vehicles || []).map(v => ({
+    value: String(v.id),
+    label: `${v.name} · ${v.vehicleNumber || '—'}`
+  }));
+
+  setDropdown('entry-vehicle-dd', {
+    // Capital is always a bus's cost; the other kinds may sit against the whole
+    // agency, which is what office rent and staff salary actually are.
+    flat: kind === 'capital' ? buses : [{ value: '', label: 'Whole agency' }, ...buses],
+    value: document.getElementById('entry-vehicle')?.value,
+    placeholder: kind === 'capital' ? 'Choose a bus' : 'Whole agency'
+  });
 
   document.getElementById('entry-vehicle-req').textContent = kind === 'capital' ? '*' : '';
   document.getElementById('entry-hint').textContent = kind === 'capital'
