@@ -8,6 +8,7 @@ import 'widgets/trips_bar.dart';
 import 'widgets/date_selector.dart';
 import 'widgets/agency_selector.dart';
 import 'widgets/banner_carousel.dart';
+import 'widgets/location_prompt_bar.dart';
 import '../theme/app_colors.dart';
 import '../bookings/my_bookings_screen.dart';
 import '../profile/profile_screen.dart';
@@ -353,6 +354,11 @@ class _ExploreTabState extends State<_ExploreTab> {
                 ),
               ),
             ),
+            // The way in to location sharing, above the fold on the screen the
+            // site opens on. Hides itself when there is nobody signed in, once
+            // sharing is running, or when a button here could not fix the
+            // problem anyway.
+            const SliverToBoxAdapter(child: LocationPromptBar()),
             // Gorgeous Header with Search Box
             SliverAppBar(
               pinned: false,

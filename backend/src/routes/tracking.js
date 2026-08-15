@@ -103,7 +103,14 @@ router.get("/config", (req, res) => {
     staleAfterMinutes: STALE_AFTER_MS / 60000,
     // Places are named server-side from every reported fix. Nominatim needs no
     // key, so this is true on a fresh install.
-    placeNamesEnabled: true
+    placeNamesEnabled: true,
+    // False means positions are only held in this process's memory. On one
+    // long-running server that is merely lossy across restarts; on serverless
+    // hosting it is fatal and silent — the instance that stores a position is
+    // rarely the one asked for it, so every portal shows an empty map while
+    // every report returns 201. Surfaced here so that failure can be seen
+    // rather than guessed at.
+    positionsPersisted: databaseConfigured
   });
 });
 

@@ -4,6 +4,7 @@ import '../agency/agency_membership_screen.dart';
 import '../agency/agency_session.dart';
 import '../agency/money.dart';
 import '../theme/app_colors.dart';
+import '../services/location_sharing.dart';
 import '../tracking/live_location_screen.dart';
 
 /// Profile tab — the signed-in agency's account panel.
@@ -45,6 +46,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
 
     if (confirmed != true) return;
+    // Before the session goes: sharing outlives any one screen now, so signing
+    // out without stopping it would leave the previous account reporting from
+    // this device with nothing on screen admitting it.
+    await LocationSharing.instance.reset();
     await _session.signOut();
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(

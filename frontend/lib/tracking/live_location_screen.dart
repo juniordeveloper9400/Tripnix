@@ -1,19 +1,20 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
 
 import '../agency/agency_session.dart';
 import '../services/api_service.dart';
 import '../services/location_service.dart';
+import '../services/location_sharing.dart';
 import '../theme/app_colors.dart';
 
 /// Share where you are, and see who else in your agency is sharing.
 ///
 /// Sharing is per person, not per bus: whoever is signed in allows location and
-/// appears on their agency's map as themselves. Nothing is reported until they
-/// switch it on, and switching it off deletes the last position rather than
-/// leaving it to go stale.
+/// appears on their agency's map as themselves. The sharing itself belongs to
+/// [LocationSharing] rather than to this screen — closing this page must not
+/// stop somebody reporting, which is exactly what happened while the stream was
+/// owned here.
 class LiveLocationScreen extends StatefulWidget {
   const LiveLocationScreen({super.key});
 
@@ -21,39 +22,16 @@ class LiveLocationScreen extends StatefulWidget {
   State<LiveLocationScreen> createState() => _LiveLocationScreenState();
 }
 
-class _LiveLocationScreenState extends State<LiveLocationScreen>
-    with WidgetsBindingObserver {
-  /// Somebody counts as live for 15 minutes after their last fix, so a person
-  /// standing still has to speak up well inside that or they drop off the
-  /// portals' map while sitting in plain sight at the depot.
-  static const _heartbeat = Duration(minutes: 2);
-
-  /// The floor between two reports. Without it a phone in a moving vehicle would
-  /// post on every twitch of the GPS, which costs data and tells the office
-  /// nothing new.
-  static const _minimumGap = Duration(seconds: 20);
-
+class _LiveLocationScreenState extends State<LiveLocationScreen> {
   /// How often the people list below is re-read while this screen is open.
   static const _listRefresh = Duration(seconds: 20);
 
   final _api = ApiService.instance;
   final _location = LocationService.instance;
+  final _sharing = LocationSharing.instance;
   final _session = AgencySession.instance;
 
-  bool _sharing = false;
-  LocationBlock _block = LocationBlock.none;
-
-  StreamSubscription<Position>? _positions;
-  Timer? _heartbeatTimer;
   Timer? _listTimer;
-
-  Position? _lastPosition;
-  DateTime? _lastSentAt;
-  String _placeName = '';
-  String? _shareError;
-  bool _sending = false;
-  bool _asking = false;
-
   Map<String, dynamic>? _tracking;
 
   String get _operatorName => _session.operatorName;
@@ -62,55 +40,17 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    _bootstrap();
+    _sharing.refreshBlock();
+    _loadPeople();
+    _listTimer = Timer.periodic(_listRefresh, (_) => _loadPeople());
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _stopStream();
     _listTimer?.cancel();
+    // Deliberately does not stop sharing: it belongs to the app, not to this
+    // route, and someone leaving this page has not asked to stop reporting.
     super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed) return;
-
-    // Coming back from the settings app is the one moment permission can have
-    // changed without this screen hearing about it, and it is exactly when the
-    // user expects the page to notice.
-    _refreshBlock();
-
-    // Dart timers do not run while the app is suspended, so the heartbeat may
-    // have missed its turn — on iOS it certainly has. Reporting on resume means
-    // the worst case is a gap while the phone was asleep, not a position that
-    // stayed stale after its owner picked the phone back up.
-    final last = _lastPosition;
-    if (_sharing && last != null) _send(last, heartbeat: true);
-
-    _loadPeople();
-  }
-
-  Future<void> _bootstrap() async {
-    await _refreshBlock();
-    await _loadPeople();
-    _listTimer = Timer.periodic(_listRefresh, (_) => _loadPeople());
-  }
-
-  Future<void> _refreshBlock() async {
-    final block = await _location.currentBlock();
-    if (!mounted) return;
-    setState(() => _block = block);
-
-    // Location switched off underneath a running share means the fixes have
-    // already stopped; saying so beats a toggle that claims to be on.
-    if (_sharing && block != LocationBlock.none) {
-      await _stopSharing();
-      if (!mounted) return;
-      setState(() => _shareError = LocationService.messageFor(block));
-    }
   }
 
   Future<void> _loadPeople() async {
@@ -125,174 +65,6 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
     }
   }
 
-  // ─── Permission ──────────────────────────────────────────
-
-  /// Raises the browser's or the OS's permission prompt on its own.
-  ///
-  /// Separate from [_startSharing] because allowing location and broadcasting
-  /// it are different decisions — someone may well want to grant the permission
-  /// without switching sharing on in the same tap.
-  Future<void> _askForLocation() async {
-    setState(() {
-      _asking = true;
-      _shareError = null;
-    });
-
-    final block = await _location.ensurePermission();
-    if (!mounted) return;
-
-    setState(() {
-      _block = block;
-      _asking = false;
-    });
-  }
-
-  // ─── Sharing ─────────────────────────────────────────────
-
-  Future<void> _startSharing() async {
-    if (_username.isEmpty || _operatorName.isEmpty) {
-      setState(() => _shareError = 'Sign in again before sharing your location.');
-      return;
-    }
-
-    setState(() {
-      _shareError = null;
-      _sending = true;
-    });
-
-    final block = await _location.ensurePermission();
-    if (!mounted) return;
-
-    if (block != LocationBlock.none) {
-      setState(() {
-        _block = block;
-        _sending = false;
-        _shareError = LocationService.messageFor(block);
-      });
-      return;
-    }
-
-    setState(() {
-      _block = LocationBlock.none;
-      _sharing = true;
-    });
-
-    try {
-      // Sent before the stream is wired up so the office sees the person
-      // straight away — the stream's distance filter means somebody standing
-      // still would otherwise emit nothing at all.
-      final first = await _location.currentPosition();
-      await _send(first);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _shareError = _clean(e));
-    }
-
-    if (!mounted) return;
-    setState(() => _sending = false);
-
-    // Getting the first fix takes a few seconds, and the button says "Stop
-    // sharing" throughout. Someone who presses it in that window must not end
-    // up with a stream that starts anyway and reports from their pocket.
-    if (!_sharing) return;
-
-    _positions = _location.positionStream().listen(
-      _send,
-      onError: (Object e) {
-        if (!mounted) return;
-        setState(() => _shareError = _clean(e));
-      },
-    );
-
-    // The filtered stream goes silent when somebody stops moving, which the
-    // portals cannot tell apart from a phone that has been switched off. This
-    // keeps the last known position current so a stationary person reads as
-    // stationary, not missing.
-    _heartbeatTimer = Timer.periodic(_heartbeat, (_) {
-      final last = _lastPosition;
-      if (last != null) _send(last, heartbeat: true);
-    });
-  }
-
-  /// Tears down the stream and the heartbeat without touching the server.
-  void _stopStream() {
-    _positions?.cancel();
-    _positions = null;
-    _heartbeatTimer?.cancel();
-    _heartbeatTimer = null;
-  }
-
-  Future<void> _stopSharing() async {
-    _stopStream();
-    if (mounted) {
-      setState(() {
-        _sharing = false;
-        _placeName = '';
-        _lastSentAt = null;
-      });
-    }
-    _lastPosition = null;
-
-    // The stored position goes with it. Leaving it to expire would keep the
-    // person on their agency's map for another fifteen minutes after they
-    // deliberately switched sharing off.
-    if (_username.isEmpty) return;
-    try {
-      await _api.stopSharingMyLocation(_username);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _shareError = _clean(e));
-    }
-    await _loadPeople();
-  }
-
-  /// Posts a fix, unless one went recently enough that this one would say the
-  /// same thing.
-  Future<void> _send(Position position, {bool heartbeat = false}) async {
-    _lastPosition = position;
-
-    final sentAt = _lastSentAt;
-    if (!heartbeat && sentAt != null && DateTime.now().difference(sentAt) < _minimumGap) {
-      return;
-    }
-
-    if (_username.isEmpty || _operatorName.isEmpty) return;
-
-    try {
-      final fix = await _api.reportMyLocation(
-        username: _username,
-        operatorName: _operatorName,
-        displayName: _session.personName,
-        role: _session.role,
-        lat: position.latitude,
-        lng: position.longitude,
-        speedKph: speedKphOf(position),
-        heading: headingOf(position),
-      );
-
-      if (!mounted) return;
-      setState(() {
-        _lastSentAt = DateTime.now();
-        // The API names the place from the coordinates; showing its answer
-        // rather than the numbers means the person and the office are looking
-        // at the same words for where they are.
-        _placeName = (fix['place'] as String?)?.trim().isNotEmpty == true
-            ? fix['place'] as String
-            : (fix['placeName'] as String? ?? '');
-        _shareError = null;
-      });
-      await _loadPeople();
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _shareError = _clean(e));
-    }
-  }
-
-  String _clean(Object error) =>
-      error.toString().replaceFirst('Exception: ', '').trim();
-
-  // ─── UI ──────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -306,33 +78,43 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
       ),
       body: RefreshIndicator(
         onRefresh: () async {
-          await _refreshBlock();
+          await _sharing.refreshBlock();
           await _loadPeople();
         },
-        child: ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-          children: [
-            _shareCard(),
-            const SizedBox(height: 20),
-            const Text(
-              'SHARING RIGHT NOW',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 1,
-                color: Colors.grey,
-              ),
-            ),
-            const SizedBox(height: 10),
-            _peopleList(),
-          ],
+        child: ListenableBuilder(
+          listenable: _sharing,
+          builder: (context, _) {
+            // The list is re-read whenever a fix is posted, so the row for the
+            // person using this screen keeps up with their own movement.
+            return ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+              children: [
+                _shareCard(),
+                const SizedBox(height: 20),
+                const Text(
+                  'SHARING RIGHT NOW',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1,
+                    color: Colors.grey,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                _peopleList(),
+              ],
+            );
+          },
         ),
       ),
     );
   }
 
   Widget _shareCard() {
+    final sharing = _sharing.sharing;
+    final error = _sharing.error;
+
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -349,13 +131,13 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
                 width: 42,
                 height: 42,
                 decoration: BoxDecoration(
-                  color: (_sharing ? Colors.green : AppColors.red)
+                  color: (sharing ? Colors.green : AppColors.red)
                       .withValues(alpha: 0.12),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
-                  _sharing ? Icons.my_location : Icons.location_disabled,
-                  color: _sharing ? Colors.green.shade700 : AppColors.red,
+                  sharing ? Icons.my_location : Icons.location_disabled,
+                  color: sharing ? Colors.green.shade700 : AppColors.red,
                   size: 21,
                 ),
               ),
@@ -365,13 +147,13 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      _sharing ? 'Sharing your location' : 'Not sharing',
+                      sharing ? 'Sharing your location' : 'Not sharing',
                       style: const TextStyle(
                           fontWeight: FontWeight.bold, fontSize: 15),
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      _sharing
+                      sharing
                           ? 'Your office and owner can see where you are.'
                           : 'Turn this on to let your agency see where you are.',
                       style: TextStyle(fontSize: 12, color: Colors.grey[600]),
@@ -381,19 +163,29 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
               ),
             ],
           ),
-          if (_block != LocationBlock.none) ...[
+          if (!_sharing.canShare) ...[
+            const SizedBox(height: 14),
+            _notice(
+              icon: Icons.login,
+              colour: Colors.orange.shade800,
+              message: 'Sign in to your agency account before sharing — a '
+                  'position has to belong to somebody for your office to know '
+                  'whose it is.',
+            ),
+          ],
+          if (_sharing.block != LocationBlock.none) ...[
             const SizedBox(height: 14),
             _permissionNotice(),
           ],
-          if (_shareError != null) ...[
+          if (error != null) ...[
             const SizedBox(height: 14),
             _notice(
               icon: Icons.error_outline,
               colour: AppColors.red,
-              message: _shareError!,
+              message: error,
             ),
           ],
-          if (_sharing) ...[
+          if (sharing) ...[
             const SizedBox(height: 14),
             _currentFix(),
           ],
@@ -401,9 +193,12 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
           SizedBox(
             width: double.infinity,
             height: 50,
-            child: _sharing
+            child: sharing
                 ? OutlinedButton.icon(
-                    onPressed: _stopSharing,
+                    onPressed: () async {
+                      await _sharing.stop();
+                      await _loadPeople();
+                    },
                     icon: const Icon(Icons.stop_circle_outlined, size: 20),
                     label: const Text('Stop sharing',
                         style: TextStyle(fontWeight: FontWeight.bold)),
@@ -415,8 +210,13 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
                     ),
                   )
                 : ElevatedButton.icon(
-                    onPressed: _sending ? null : _startSharing,
-                    icon: _sending
+                    onPressed: _sharing.starting || !_sharing.canShare
+                        ? null
+                        : () async {
+                            await _sharing.start();
+                            await _loadPeople();
+                          },
+                    icon: _sharing.starting
                         ? const SizedBox(
                             width: 17,
                             height: 17,
@@ -425,7 +225,9 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
                           )
                         : const Icon(Icons.near_me, size: 19),
                     label: Text(
-                      _sending ? 'Getting your position…' : 'Share my location',
+                      _sharing.starting
+                          ? 'Getting your position…'
+                          : 'Share my location',
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                     style: ElevatedButton.styleFrom(
@@ -444,14 +246,14 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
   Widget _permissionNotice() {
     // A plain refusal can still be asked about, and this button is the only
     // thing on the screen that raises the prompt on its own.
-    final canAsk = _block == LocationBlock.denied;
+    final canAsk = _sharing.block == LocationBlock.denied;
 
     // Only worth offering where it goes somewhere: on the web there is no app
     // settings page and the underlying call is unsupported.
     final needsSettings =
-        _block == LocationBlock.deniedForever && _location.canOpenSettings;
+        _sharing.block == LocationBlock.deniedForever && _location.canOpenSettings;
     final needsService =
-        _block == LocationBlock.serviceDisabled && _location.canOpenSettings;
+        _sharing.block == LocationBlock.serviceDisabled && _location.canOpenSettings;
 
     return Container(
       padding: const EdgeInsets.all(13),
@@ -470,7 +272,7 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
               const SizedBox(width: 9),
               Expanded(
                 child: Text(
-                  LocationService.messageFor(_block),
+                  LocationService.messageFor(_sharing.block),
                   style: const TextStyle(fontSize: 12.5, height: 1.45),
                 ),
               ),
@@ -482,8 +284,8 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
               width: double.infinity,
               height: 44,
               child: ElevatedButton.icon(
-                onPressed: _asking ? null : _askForLocation,
-                icon: _asking
+                onPressed: _sharing.asking ? null : () => _sharing.ask(),
+                icon: _sharing.asking
                     ? const SizedBox(
                         width: 16,
                         height: 16,
@@ -492,7 +294,9 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
                       )
                     : const Icon(Icons.location_on_outlined, size: 19),
                 label: Text(
-                  _asking ? 'Waiting for your answer…' : 'Allow location access',
+                  _sharing.asking
+                      ? 'Waiting for your answer…'
+                      : 'Allow location access',
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
                 style: ElevatedButton.styleFrom(
@@ -531,7 +335,9 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
   }
 
   Widget _currentFix() {
-    final sentAt = _lastSentAt;
+    final sentAt = _sharing.lastSentAt;
+    final place = _sharing.placeName;
+
     return Container(
       padding: const EdgeInsets.all(13),
       decoration: BoxDecoration(
@@ -549,7 +355,7 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  _placeName.isEmpty ? 'Finding the place name…' : _placeName,
+                  place.isEmpty ? 'Finding the place name…' : place,
                   style: const TextStyle(
                       fontWeight: FontWeight.bold, fontSize: 13.5),
                 ),
