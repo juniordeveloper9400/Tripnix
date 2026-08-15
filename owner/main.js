@@ -1,4 +1,4 @@
-import { renderFleetMap, renderBusMiniMap, fleetForDisplay } from '../shared/fleet-map.js';
+import { renderFleetMap, renderBusMiniMap, fleetForDisplay, placeOf } from '../shared/fleet-map.js';
 
 const API_BASE = window.location.origin.includes('3006')
   ? 'http://localhost:3000/api'
@@ -122,8 +122,13 @@ function enterPortal() {
 }
 
 function signOut() {
+  // Stopped before the session goes, or the poll keeps asking for a fleet
+  // there is no longer anyone signed in to see.
+  stopTrackingWatch();
+
   sessionStorage.removeItem(SESSION_KEY);
   state.user = null;
+  state.tracking = null;
   document.getElementById('app').classList.add('hidden');
   document.getElementById('login-screen').classList.remove('hidden');
   document.getElementById('login-form').reset();
@@ -186,7 +191,11 @@ function switchTab(tab) {
   document.getElementById('page-title').textContent = title;
   document.getElementById('page-sub').textContent = sub;
 
-  if (tab === 'gps') loadTracking();
+  // Both of these show the fleet map, so both keep it current while they are on
+  // screen. Every other tab is a snapshot loaded when it is opened.
+  if (tab === 'gps' || tab === 'dashboard') startTrackingWatch();
+  else stopTrackingWatch();
+
   if (tab === 'accounts') loadAccounts();
   if (tab === 'diary') loadOwnerAgencyDiary();
 }
@@ -194,10 +203,13 @@ function switchTab(tab) {
 // ─── Loading ───────────────────────────────────────────────
 
 async function loadAll() {
+  // The portal opens on the dashboard, which carries the compact fleet map, so
+  // the watch starts with the portal rather than waiting for a tab change.
+  startTrackingWatch();
+
   await Promise.allSettled([
     loadDashboard(),
     loadAccounts(),
-    loadTracking(),
     loadOwnerAgencyDiary()
   ]);
 }
@@ -952,6 +964,42 @@ function downloadAllMonths() {
 
 // ─── GPS ───────────────────────────────────────────────────
 
+/// How often an open fleet map re-reads the fleet.
+///
+/// A bus reports roughly every couple of minutes and whenever it moves, so this
+/// is fast enough that a marker never sits visibly out of date, and slow enough
+/// that leaving the portal open all day is not a request every second.
+const TRACKING_REFRESH_MS = 20000;
+
+let trackingTimer = null;
+
+/// Keeps the fleet current for as long as a map is the thing on screen.
+///
+/// Without this the map was only ever as fresh as the last time someone changed
+/// tabs — an owner watching for a bus to arrive would have seen it parked at
+/// its last position indefinitely.
+function startTrackingWatch() {
+  stopTrackingWatch();
+  loadTracking();
+  trackingTimer = setInterval(() => {
+    // A hidden tab is nobody watching. Browsers throttle background timers
+    // anyway, and polling for a map that is not on screen just spends the
+    // API's budget.
+    if (!document.hidden) loadTracking();
+  }, TRACKING_REFRESH_MS);
+}
+
+function stopTrackingWatch() {
+  if (trackingTimer) clearInterval(trackingTimer);
+  trackingTimer = null;
+}
+
+// Coming back to the tab should show where the buses are now, not where they
+// were when it was hidden — the throttled interval alone can be a minute late.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && trackingTimer) loadTracking();
+});
+
 async function loadTracking() {
   const op = state.user.operatorName;
   try {
@@ -964,6 +1012,9 @@ async function loadTracking() {
     state.tracking = await api(`/tracking?operatorName=${encodeURIComponent(op)}`);
     renderTracking();
   } catch (err) {
+    // One failed poll must not wipe a fleet that is already on screen — a
+    // flaky minute would otherwise blank the map an owner is watching.
+    if (state.tracking) return;
     document.getElementById('gps-list').innerHTML =
       `<p class="empty">❌ ${escapeHtml(err.message)}</p>`;
   }
@@ -992,9 +1043,13 @@ function renderTracking() {
               ? '<span class="pill pill-green">LIVE</span>'
               : `<span class="pill pill-amber">${l.ageMinutes} MIN AGO</span>`;
 
+        // Where a bus is, in words. The API names every position when it is
+        // reported, so this row reads "Chalakudy, Thrissur" rather than a pair
+        // of numbers the owner would have to paste into a map to understand.
+        const place = placeOf(l);
         const where = !l
           ? 'This bus has never reported a position'
-          : `${l.label ? escapeHtml(l.label) + ' · ' : ''}${l.lat.toFixed(5)}, ${l.lng.toFixed(5)}` +
+          : `${place ? escapeHtml(place) : 'Position received, place name not available'}` +
             `${l.speedKph ? ' · ' + Math.round(l.speedKph) + ' km/h' : ''}`;
 
         const link = l

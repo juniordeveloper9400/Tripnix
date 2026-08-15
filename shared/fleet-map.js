@@ -11,6 +11,18 @@
 
 const STYLE_ID = 'tripnix-fleet-map-styles';
 
+/// Where a bus is, in words.
+///
+/// The API names every fix from its coordinates when it is reported, so this is
+/// only ever picking which field carries that name. Coordinates are deliberately
+/// not a fallback: "10.52760, 76.21440" is not an answer to "where is my bus",
+/// and showing it invites someone to paste it into another map to find out what
+/// this one already knows.
+export function placeOf(location) {
+  if (!location) return '';
+  return String(location.place || location.placeName || location.label || '').trim();
+}
+
 /// Loads Leaflet once per page — the keyless path to a real, interactive map
 /// with a marker per bus.
 ///
@@ -117,12 +129,12 @@ async function renderLeafletMap(container, t, placed, { noteEl, compact, sample 
     seen.add(v.vehicleId);
     bounds.push([l.lat, l.lng]);
 
+    const place = placeOf(l);
     const popup = `
       <strong>${esc(v.vehicleName)}</strong><br>
       ${esc(v.vehicleNumber || '')} · ${l.live ? 'Live now' : l.ageMinutes + ' min ago'}<br>
-      ${l.label ? esc(l.label) + '<br>' : ''}
-      ${l.speedKph ? Math.round(l.speedKph) + ' km/h<br>' : ''}
-      <small>${l.lat.toFixed(5)}, ${l.lng.toFixed(5)}</small>
+      <small>${place ? esc(place) : 'Place name not available'}</small>
+      ${l.speedKph ? '<br>' + Math.round(l.speedKph) + ' km/h' : ''}
       ${sample ? '<br><em>Sample position</em>' : ''}`;
 
     let marker = live.markers.get(v.vehicleId);
@@ -347,6 +359,10 @@ function sampleFleet(vehicles) {
       location: {
         lat: spot.lat,
         lng: spot.lng,
+        // Named the same way a real fix is, so the preview shows the place
+        // names the fleet view is actually made of.
+        place: spot.label,
+        placeName: spot.label,
         label: spot.label,
         // Alternating so both marker states are visible in the preview.
         live: i % 3 !== 2,
@@ -620,10 +636,12 @@ function renderEmbedMap(container, t, placed, { noteEl, compact, sample = false 
   );
 
   if (noteEl) {
+    const place = placeOf(l);
     noteEl.textContent = sample
-      ? `Sample positions · showing ${selected.vehicleNumber || selected.vehicleName} near ${l.label}`
+      ? `Sample positions · showing ${selected.vehicleNumber || selected.vehicleName}` +
+        `${place ? ' near ' + place : ''}`
       : `${t.reporting} of ${t.total} reporting · showing ${selected.vehicleNumber || selected.vehicleName}` +
-        `${l.label ? ' near ' + l.label : ''}`;
+        `${place ? ' near ' + place : ''}`;
   }
 }
 
@@ -675,9 +693,10 @@ async function renderGoogleMap(container, t, placed, { noteEl, compact, apiKey }
     seen.add(v.vehicleId);
 
     const label = v.vehicleNumber || v.vehicleName;
+    const place = placeOf(l);
     const detail =
       `${l.live ? 'Live now' : l.ageMinutes + ' min ago'}` +
-      `${l.label ? ' · ' + esc(l.label) : ''}` +
+      `${place ? ' · ' + esc(place) : ''}` +
       `${l.speedKph ? ' · ' + Math.round(l.speedKph) + ' km/h' : ''}`;
 
     let marker = live.markers.get(v.vehicleId);
@@ -702,7 +721,9 @@ async function renderGoogleMap(container, t, placed, { noteEl, compact, apiKey }
         `<div style="font-family:system-ui;color:#0b1220;min-width:150px">
            <strong style="font-size:13px">${esc(v.vehicleName)}</strong><br>
            <span style="font-size:11px;color:#475569">${esc(label)} · ${detail}</span><br>
-           <span style="font-size:10.5px;color:#64748b">${l.lat.toFixed(5)}, ${l.lng.toFixed(5)}</span>
+           <span style="font-size:10.5px;color:#64748b">${
+             place ? esc(place) : 'Place name not available'
+           }</span>
          </div>`
       );
       live.info.open({ map: live.map, anchor: marker });

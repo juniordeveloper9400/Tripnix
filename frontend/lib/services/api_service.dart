@@ -176,6 +176,57 @@ class ApiService {
     return body;
   }
 
+  // --- Live tracking ---
+
+  /// Reports where a vehicle is now.
+  ///
+  /// Returns the fix the API stored, which carries the place name it worked out
+  /// from the coordinates — the app shows that name rather than the numbers it
+  /// just sent, so the driver sees exactly what the office sees.
+  Future<Map<String, dynamic>> reportVehicleLocation({
+    required int vehicleId,
+    required double lat,
+    required double lng,
+    double speedKph = 0,
+    double heading = 0,
+    String label = '',
+  }) async {
+    final response = await _send(
+      () => http.post(
+        Uri.parse('$baseUrl/tracking/vehicles/$vehicleId'),
+        headers: _headers,
+        body: json.encode({
+          'lat': lat,
+          'lng': lng,
+          'speedKph': speedKph,
+          'heading': heading,
+          'label': label,
+        }),
+      ),
+    );
+
+    final body = _parseResponseMap(response, defaultError: 'Could not send the position');
+    if (response.statusCode != 201) {
+      throw Exception(body['error'] ?? 'Could not send the position');
+    }
+    return body;
+  }
+
+  /// Every bus in an agency's fleet with its last known position — the same
+  /// payload the admin and owner portals draw their map from.
+  Future<Map<String, dynamic>> fetchTracking(String operatorName) async {
+    final response = await _send(
+      () => http.get(Uri.parse(
+        '$baseUrl/tracking?operatorName=${Uri.encodeComponent(operatorName)}',
+      )),
+    );
+    final body = _parseResponseMap(response, defaultError: 'Could not load tracking');
+    if (response.statusCode != 200) {
+      throw Exception(body['error'] ?? 'Could not load tracking');
+    }
+    return body;
+  }
+
   /// Uploads a picked image or video to Cloudflare R2 and returns its URL.
   ///
   /// Small files stream through the API. Anything over the serverless body

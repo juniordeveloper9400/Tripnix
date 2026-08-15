@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { allVehicles, refreshVehiclesFromDb } from "./vehicles.js";
 import { dbRef, databaseConfigured, describeDatabaseError } from "../lib/firebase.js";
+import { reverseGeocode, withinSamePlace, cachedPlaceName } from "../lib/geocode.js";
 
 const router = Router();
 
@@ -32,6 +33,9 @@ function normaliseFix(raw) {
     speedKph: Number(raw.speedKph ?? 0),
     heading: Number(raw.heading ?? 0),
     label: raw.label ?? "",
+    // Worked out once when the fix was reported, so the portals never have to
+    // geocode and never disagree about where a bus is.
+    placeName: raw.placeName ?? "",
     reportedAt: raw.reportedAt ?? new Date(0).toISOString()
   };
 }
@@ -54,8 +58,17 @@ export async function refreshLocationsFromDb() {
 function withFreshness(fix) {
   const at = new Date(fix.reportedAt).getTime();
   const ageMs = Number.isFinite(at) ? Date.now() - at : Number.MAX_SAFE_INTEGER;
+  // Fixes stored before naming existed have no name of their own. If that
+  // square has since been looked up for any bus, they get it for free; a read
+  // never waits on the geocoder to fill one in.
+  const placeName = fix.placeName || cachedPlaceName(fix.lat, fix.lng);
   return {
     ...fix,
+    placeName,
+    // The one string a client should show for "where". The geocoded name wins
+    // over the note the device sent, because a name is what the fleet view is
+    // for; the note is a label the driver typed and may be anything.
+    place: placeName || fix.label || "",
     ageMinutes: Math.max(0, Math.round(ageMs / 60000)),
     live: ageMs <= STALE_AFTER_MS
   };
@@ -73,7 +86,14 @@ router.get("/config", (req, res) => {
     mapsApiKey: key,
     // The portals fall back to their own drawn map when this is false, so the
     // GPS view still works before a key is set up.
-    mapsConfigured: Boolean(key)
+    mapsConfigured: Boolean(key),
+    // How long a fix counts as live. A device sharing its position reads this
+    // rather than hard-coding an interval, so changing the rule here changes
+    // how often the apps report without shipping a new build.
+    staleAfterMinutes: STALE_AFTER_MS / 60000,
+    // Places are named server-side from every reported fix. Nominatim needs no
+    // key, so this is true on a fresh install.
+    placeNamesEnabled: true
   });
 });
 
@@ -100,6 +120,9 @@ router.post("/vehicles/:id", async (req, res) => {
   const vehicle = allVehicles().find((v) => v.id === vehicleId);
   if (!vehicle) return res.status(404).json({ error: "Vehicle not found" });
 
+  await refreshLocationsFromDb();
+  const previous = locations.find((l) => l.vehicleId === vehicleId);
+
   const fix = {
     vehicleId,
     lat: Number(lat),
@@ -107,10 +130,21 @@ router.post("/vehicles/:id", async (req, res) => {
     speedKph: Number(speedKph ?? 0),
     heading: Number(heading ?? 0),
     label: String(label || "").trim(),
+    placeName: "",
     reportedAt: new Date().toISOString()
   };
 
-  await refreshLocationsFromDb();
+  // Named here rather than in the portals: one lookup per position instead of
+  // one per viewer per refresh, and every client then shows the same name.
+  fix.placeName = await reverseGeocode(fix.lat, fix.lng);
+
+  // A geocoder that is down or rate-limiting must not strip the name off a bus
+  // that has not actually moved — it would show as nameless until it drove far
+  // enough to land in a cached square.
+  if (!fix.placeName && withinSamePlace(previous, fix)) {
+    fix.placeName = previous.placeName || "";
+  }
+
   locations = [...locations.filter((l) => l.vehicleId !== vehicleId), fix];
 
   if (databaseConfigured) {

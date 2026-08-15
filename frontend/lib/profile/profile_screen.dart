@@ -4,6 +4,7 @@ import '../agency/agency_membership_screen.dart';
 import '../agency/agency_session.dart';
 import '../agency/money.dart';
 import '../theme/app_colors.dart';
+import '../tracking/live_location_screen.dart';
 
 /// Profile tab — the signed-in agency's account panel.
 class ProfileScreen extends StatefulWidget {
@@ -139,6 +140,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 );
                 if (mounted) setState(() {});
               },
+            ),
+            _tile(
+              icon: Icons.my_location,
+              title: 'Live Location',
+              subtitle: 'Share where a bus is so your office and owner can see it',
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const LiveLocationScreen()),
+              ),
             ),
             _tile(
               icon: Icons.admin_panel_settings_outlined,

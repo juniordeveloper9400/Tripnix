@@ -1,4 +1,29 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Live tracking. A driver's phone reports the bus position to
+         /api/tracking, which is what the admin and owner portals draw.
+         Coarse is declared alongside fine because Android 12+ lets the user
+         grant only the approximate one, and a bus on the right road is still
+         worth showing. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+
+    <!-- Declared in the debug and profile manifests by Flutter itself, but not
+         in this one — without it a release build cannot reach the API at all,
+         so no position ever leaves the phone. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- A driver puts the phone down and the screen locks. Without a foreground
+         service Android suspends the app and the fleet map freezes at the last
+         position, which reads as a parked bus rather than a stopped app.
+         FOREGROUND_SERVICE_LOCATION is the Android 14+ half of the same
+         permission and must be declared or the service throws on start. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
+
+    <!-- Keeps the CPU and Wi-Fi radio awake while sharing, so fixes are posted
+         as they happen instead of arriving in a burst when the phone wakes. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+
     <application
         android:label="tripnix"
         android:name="${applicationName}"

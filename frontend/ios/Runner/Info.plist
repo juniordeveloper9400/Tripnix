@@ -41,6 +41,19 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<!-- Shown verbatim in the iOS permission prompt. It has to say what the
+	     location is used for, or App Review rejects the build. -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Tripnix shares this bus's position with your agency while you are driving, so your office and owner can see where the fleet is.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Tripnix shares this bus's position with your agency while you are driving, so your office and owner can see where the fleet is.</string>
+	<!-- Lets iOS keep delivering positions once the driver locks the screen.
+	     Without it the fleet map freezes at whatever the last position was
+	     before the phone went to sleep, which reads as a parked bus. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
