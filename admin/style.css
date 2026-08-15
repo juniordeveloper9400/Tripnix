@@ -787,11 +787,17 @@ body {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  /* A flex item defaults to min-width:auto, so it refuses to shrink below its
+     content's intrinsic width. A <select> reports that as the width of its
+     longest option — so one long category name ("Legal & professional fees")
+     stretched this column and pushed the whole row outside the form. */
+  min-width: 0;
 }
 
 .form-row {
   display: flex;
   gap: 12px;
+  min-width: 0;
 }
 
 .flex-1 { flex: 1; }
@@ -810,6 +816,16 @@ input, select, textarea {
   border-radius: var(--radius-sm);
   color: white;
   font-size: 14px;
+  /* Fill the column rather than the longest option. Without this a select sizes
+     itself to its content and spills out of the field it belongs to. */
+  width: 100%;
+  max-width: 100%;
+}
+
+/* The closed control shows one option at a time and must not widen for a long
+   one; the open list is drawn by the browser and shows the full text anyway. */
+select {
+  text-overflow: ellipsis;
 }
 
 input:focus, select:focus, textarea:focus {
