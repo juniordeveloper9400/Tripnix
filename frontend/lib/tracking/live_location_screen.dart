@@ -63,6 +63,7 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
   String _placeName = '';
   String? _shareError;
   bool _sending = false;
+  bool _asking = false;
 
   Map<String, dynamic>? _tracking;
 
@@ -170,6 +171,27 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
   }
 
   // ─── Sharing ─────────────────────────────────────────────
+
+  /// Raises the browser's or the OS's permission prompt on its own.
+  ///
+  /// Separate from [_startSharing] because granting location and starting to
+  /// broadcast are different decisions, and only the first one has to be
+  /// possible before a bus has been picked. Nothing is reported here — the
+  /// answer only unlocks the share button.
+  Future<void> _askForLocation() async {
+    setState(() {
+      _asking = true;
+      _shareError = null;
+    });
+
+    final block = await _location.ensurePermission();
+    if (!mounted) return;
+
+    setState(() {
+      _block = block;
+      _asking = false;
+    });
+  }
 
   Future<void> _startSharing() async {
     if (_vehicleId == null) return;
@@ -501,8 +523,18 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
   }
 
   Widget _permissionNotice() {
-    final needsSettings = _block == LocationBlock.deniedForever;
-    final needsService = _block == LocationBlock.serviceDisabled;
+    // A plain refusal can still be asked about, and this button is the only
+    // thing on the screen that can raise the prompt — sharing is gated behind
+    // picking a bus, so an agency with no listed buses yet could otherwise
+    // never grant location at all.
+    final canAsk = _block == LocationBlock.denied;
+
+    // Only worth offering where it goes somewhere: on the web there is no app
+    // settings page and the underlying call is unsupported.
+    final needsSettings =
+        _block == LocationBlock.deniedForever && _location.canOpenSettings;
+    final needsService =
+        _block == LocationBlock.serviceDisabled && _location.canOpenSettings;
 
     return Container(
       padding: const EdgeInsets.all(13),
@@ -527,6 +559,34 @@ class _LiveLocationScreenState extends State<LiveLocationScreen>
               ),
             ],
           ),
+          if (canAsk) ...[
+            const SizedBox(height: 11),
+            SizedBox(
+              width: double.infinity,
+              height: 44,
+              child: ElevatedButton.icon(
+                onPressed: _asking ? null : _askForLocation,
+                icon: _asking
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Icon(Icons.location_on_outlined, size: 19),
+                label: Text(
+                  _asking ? 'Waiting for your answer…' : 'Allow location access',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.red,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ),
+          ],
           if (needsSettings || needsService) ...[
             const SizedBox(height: 9),
             Align(

@@ -23,6 +23,15 @@ enum LocationBlock {
   /// Refused permanently (or "Never ask again"). Only the settings app can
   /// undo this — [LocationService.openSettings] is the only way forward.
   deniedForever,
+
+  /// The page is served over plain HTTP from somewhere other than localhost.
+  ///
+  /// Browsers treat geolocation as a secure-context feature and refuse it
+  /// outright: no prompt appears and the call just fails. Without naming this
+  /// case the screen would sit there offering an "Allow" button that can never
+  /// produce a prompt, and the driver would reasonably conclude the app is
+  /// broken rather than the address bar.
+  insecureOrigin,
 }
 
 /// Where the device is, and permission to know it.
@@ -45,6 +54,10 @@ class LocationService {
   /// Safe to call repeatedly — when permission is already granted this makes no
   /// prompt and returns [LocationBlock.none].
   Future<LocationBlock> ensurePermission() async {
+    // Checked before anything else: on an insecure origin the browser never
+    // shows a prompt, so asking would look like the user ignored it.
+    if (isInsecureWebOrigin) return LocationBlock.insecureOrigin;
+
     // The permission is meaningless while the device's location is switched
     // off: it can be granted and still return nothing. On the web there is no
     // such device-level switch, and the check reports false on some browsers,
@@ -78,7 +91,29 @@ class LocationService {
   ///
   /// Used to show the current state on screen without a prompt appearing the
   /// moment a page opens.
+  /// Whether the browser will refuse geolocation because of how the page was
+  /// served.
+  ///
+  /// Mirrors the browsers' own secure-context rule: HTTPS is fine, and so is
+  /// localhost however it was reached, but plain HTTP on a LAN address — the
+  /// usual way a team first opens the site on a phone — is not. Deriving it
+  /// from [Uri.base] keeps this dependency-free; on anything but the web there
+  /// is no such rule and the answer is always false.
+  bool get isInsecureWebOrigin {
+    if (!kIsWeb) return false;
+    final uri = Uri.base;
+    if (uri.scheme == 'https') return false;
+    return !const {'localhost', '127.0.0.1', '::1'}.contains(uri.host);
+  }
+
+  /// Whether [openSettings] can actually go anywhere.
+  ///
+  /// False on the web, where there is no app settings page to open and the
+  /// underlying call throws — a button offering it would be a dead end.
+  bool get canOpenSettings => !kIsWeb;
+
   Future<LocationBlock> currentBlock() async {
+    if (isInsecureWebOrigin) return LocationBlock.insecureOrigin;
     if (!kIsWeb && !await Geolocator.isLocationServiceEnabled()) {
       return LocationBlock.serviceDisabled;
     }
@@ -189,12 +224,24 @@ class LocationService {
 
   /// Opens the app's own settings page, the only route back from
   /// [LocationBlock.deniedForever].
-  Future<bool> openSettings() => Geolocator.openAppSettings();
+  ///
+  /// Does nothing on the web rather than throwing, so a caller that offers the
+  /// button anyway fails quietly instead of crashing the screen.
+  Future<bool> openSettings() async {
+    if (!canOpenSettings) return false;
+    return Geolocator.openAppSettings();
+  }
 
   /// Opens the device's location settings, for [LocationBlock.serviceDisabled].
-  Future<bool> openLocationSettings() => Geolocator.openLocationSettings();
+  Future<bool> openLocationSettings() async {
+    if (!canOpenSettings) return false;
+    return Geolocator.openLocationSettings();
+  }
 
   /// What to tell the user, and what the button that follows should do.
+  ///
+  /// The web wording differs because the remedies do: there is no app settings
+  /// page and no device location switch, only the padlock in the address bar.
   static String messageFor(LocationBlock block) => switch (block) {
         LocationBlock.none => '',
         LocationBlock.serviceDisabled =>
@@ -203,9 +250,15 @@ class LocationService {
         LocationBlock.denied =>
           'Tripnix needs location access to show your agency where this bus is. '
               'Nothing is shared until you start sharing.',
-        LocationBlock.deniedForever =>
-          'Location access was turned off for Tripnix. Open settings and allow '
-              'location to share this bus’s position.',
+        LocationBlock.deniedForever => kIsWeb
+            ? 'This browser is blocking location for Tripnix. Click the padlock '
+                'in the address bar, set Location to Allow, then reload the page.'
+            : 'Location access was turned off for Tripnix. Open settings and '
+                'allow location to share this bus’s position.',
+        LocationBlock.insecureOrigin =>
+          'This site is open over an insecure connection, and browsers only '
+              'give location to secure ones. Open Tripnix over https:// (or at '
+              'localhost during development) to share this bus’s position.',
       };
 }
 
