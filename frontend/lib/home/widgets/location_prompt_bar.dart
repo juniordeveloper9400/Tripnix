@@ -4,6 +4,7 @@ import '../../services/location_service.dart';
 import '../../services/location_sharing.dart';
 import '../../theme/app_colors.dart';
 import '../../tracking/live_location_screen.dart';
+import '../../tracking/start_trip_sheet.dart';
 
 /// The way in to location sharing, on the first screen the site opens on.
 ///
@@ -150,11 +151,17 @@ class _LocationPromptBarState extends State<LocationPromptBar>
           return;
         }
 
-        // One tap does the whole thing: raises the permission prompt and, once
-        // it is granted, starts reporting. Asking someone to allow location and
-        // then hunt for a second button to actually share is how a position
-        // never reaches the office.
-        await _sharing.start();
+        // Who is driving and where the run goes, then the permission prompt and
+        // reporting — all from this one button. Backing out of the sheet leaves
+        // sharing off rather than starting an unidentified bus.
+        final trip = await showStartTripSheet(context);
+        if (trip == null || !mounted) return;
+
+        await _sharing.start(
+          driverName: trip.driverName,
+          fromPlace: trip.fromPlace,
+          toPlace: trip.toPlace,
+        );
         if (!mounted) return;
         if (!_sharing.sharing && _sharing.block != LocationBlock.none) {
           await _openLocationScreen();

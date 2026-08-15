@@ -56,6 +56,14 @@ class LocationSharing extends ChangeNotifier with WidgetsBindingObserver {
   int? _vehicleId;
   String _vehicleLabel = '';
 
+  /// The run this bus is on, as the driver described it when they started.
+  ///
+  /// Held here rather than asked for on every fix: a driver types it once at the
+  /// start of a trip, and every position for the rest of that trip carries it.
+  String _driverName = '';
+  String _fromPlace = '';
+  String _toPlace = '';
+
   bool get sharing => _sharing;
   bool get starting => _starting;
   bool get asking => _asking;
@@ -67,6 +75,19 @@ class LocationSharing extends ChangeNotifier with WidgetsBindingObserver {
   /// Which bus this phone is reporting as, and how it reads on screen.
   int? get vehicleId => _vehicleId;
   String get vehicleLabel => _vehicleLabel;
+
+  /// Who is driving and the run they are on.
+  String get driverName => _driverName;
+  String get fromPlace => _fromPlace;
+  String get toPlace => _toPlace;
+
+  /// The run in one line, for anywhere that shows it back.
+  String get routeLabel {
+    if (_fromPlace.isEmpty && _toPlace.isEmpty) return '';
+    if (_fromPlace.isEmpty) return 'To $_toPlace';
+    if (_toPlace.isEmpty) return 'From $_fromPlace';
+    return '$_fromPlace → $_toPlace';
+  }
 
   /// True when there is a signed-in account and a bus chosen to report as.
   ///
@@ -177,8 +198,21 @@ class LocationSharing extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// Grants if needed, then starts reporting.
-  Future<void> start() async {
+  ///
+  /// The driver and the run travel with every fix from here on, so the office
+  /// sees who is on the bus and where it is headed rather than a bare marker.
+  Future<void> start({
+    String driverName = '',
+    String fromPlace = '',
+    String toPlace = '',
+  }) async {
     if (_sharing || _starting) return;
+
+    // Only overwritten when something was given, so a restart that reuses the
+    // last trip does not wipe it.
+    if (driverName.isNotEmpty) _driverName = driverName;
+    if (fromPlace.isNotEmpty) _fromPlace = fromPlace;
+    if (toPlace.isNotEmpty) _toPlace = toPlace;
 
     if (needsVehicle) {
       _error = 'Choose which bus this phone is on before sharing.';
@@ -256,6 +290,10 @@ class LocationSharing extends ChangeNotifier with WidgetsBindingObserver {
     _placeName = '';
     _lastSentAt = null;
     _lastPosition = null;
+    // The run is over. Keeping it would offer the last trip's destination as
+    // the default for an unrelated one tomorrow.
+    _fromPlace = '';
+    _toPlace = '';
     notifyListeners();
 
     // The stored position goes with it. Leaving it to expire would keep the bus
@@ -292,7 +330,11 @@ class LocationSharing extends ChangeNotifier with WidgetsBindingObserver {
         // Who is driving travels with the bus's position, so the office can
         // ask "who is on it" without a second lookup.
         driverUsername: _session.username,
-        driverName: _session.personName,
+        // What the driver typed wins over the account holder's name: the phone
+        // may well be signed in as the agency while somebody else drives.
+        driverName: _driverName.isEmpty ? _session.personName : _driverName,
+        fromPlace: _fromPlace,
+        toPlace: _toPlace,
         speedKph: speedKphOf(position),
         heading: headingOf(position),
       );

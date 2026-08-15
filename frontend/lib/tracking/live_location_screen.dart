@@ -8,6 +8,7 @@ import '../services/api_service.dart';
 import '../services/location_service.dart';
 import '../services/location_sharing.dart';
 import '../theme/app_colors.dart';
+import 'start_trip_sheet.dart';
 
 /// Share where this bus is, and see the whole fleet come back.
 ///
@@ -99,6 +100,23 @@ class _LiveLocationScreenState extends State<LiveLocationScreen> {
     }
   }
 
+  /// Asks who is driving and where the run goes, then starts reporting.
+  ///
+  /// Backing out of the sheet leaves sharing off — starting anyway with blank
+  /// details would put an unidentified bus on the office's map, which is the
+  /// thing these fields exist to prevent.
+  Future<void> _startWithTrip() async {
+    final trip = await showStartTripSheet(context);
+    if (trip == null || !mounted) return;
+
+    await _sharing.start(
+      driverName: trip.driverName,
+      fromPlace: trip.fromPlace,
+      toPlace: trip.toPlace,
+    );
+    await _loadFleet();
+  }
+
   String _labelFor(Vehicle v) =>
       v.vehicleNumber.isEmpty ? v.name : '${v.name} · ${v.vehicleNumber}';
 
@@ -159,10 +177,23 @@ class _LiveLocationScreenState extends State<LiveLocationScreen> {
     );
   }
 
+  /// Which bus, and the run it is on, in one line under the status.
+  ///
+  /// Reads back exactly what was reported, so a driver can see at a glance that
+  /// the office is being told the right thing.
+  String _sharingSubtitle() {
+    final parts = [
+      if (_sharing.vehicleLabel.isNotEmpty) _sharing.vehicleLabel,
+      if (_sharing.routeLabel.isNotEmpty) _sharing.routeLabel,
+    ];
+    return parts.isEmpty
+        ? 'Your office and owner can see this bus on their map.'
+        : parts.join(' · ');
+  }
+
   Widget _shareCard() {
     final sharing = _sharing.sharing;
     final error = _sharing.error;
-    final label = _sharing.vehicleLabel;
 
     return Container(
       padding: const EdgeInsets.all(18),
@@ -202,11 +233,7 @@ class _LiveLocationScreenState extends State<LiveLocationScreen> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      sharing
-                          ? (label.isEmpty
-                              ? 'Your office and owner can see this bus on their map.'
-                              : '$label is on your office and owner’s map.')
-                          : 'Turn this on while you are driving.',
+                      sharing ? _sharingSubtitle() : 'Turn this on while you are driving.',
                       style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                     ),
                   ],
@@ -255,10 +282,7 @@ class _LiveLocationScreenState extends State<LiveLocationScreen> {
                 : ElevatedButton.icon(
                     onPressed: _sharing.starting || !_sharing.canShare
                         ? null
-                        : () async {
-                            await _sharing.start();
-                            await _loadFleet();
-                          },
+                        : _startWithTrip,
                     icon: _sharing.starting
                         ? const SizedBox(
                             width: 17,
@@ -510,6 +534,21 @@ class _LiveLocationScreenState extends State<LiveLocationScreen> {
     final place = (location?['place'] as String?)?.trim() ?? '';
     final ageMinutes = (location?['ageMinutes'] as num?)?.round() ?? 0;
     final driver = (location?['driverName'] as String?)?.trim() ?? '';
+    final from = (location?['fromPlace'] as String?)?.trim() ?? '';
+    final to = (location?['toPlace'] as String?)?.trim() ?? '';
+
+    final route = from.isEmpty && to.isEmpty
+        ? ''
+        : from.isEmpty
+            ? 'To $to'
+            : to.isEmpty
+                ? 'From $from'
+                : '$from → $to';
+
+    final detail = [
+      if (driver.isNotEmpty) 'Driver: $driver',
+      if (route.isNotEmpty) route,
+    ].join(' · ');
 
     final (Color colour, String badge) = location == null
         ? (Colors.grey, 'NO SIGNAL')
@@ -575,13 +614,13 @@ class _LiveLocationScreenState extends State<LiveLocationScreen> {
                   where,
                   style: TextStyle(fontSize: 12, color: Colors.grey[700]),
                 ),
-                // Who is on the bus, when the fix said. The bus is the subject
-                // of this row, so the driver is a detail under it rather than
-                // the heading.
-                if (driver.isNotEmpty) ...[
+                // Who is on the bus and where the run goes. The bus is the
+                // subject of this row, so these are details under it rather
+                // than the heading.
+                if (detail.isNotEmpty) ...[
                   const SizedBox(height: 2),
                   Text(
-                    'Driver: $driver',
+                    detail,
                     style: TextStyle(fontSize: 11.5, color: Colors.grey[600]),
                   ),
                 ],

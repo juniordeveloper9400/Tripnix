@@ -41,6 +41,11 @@ function normaliseFix(raw) {
     // recorded, which read as an unattributed position rather than a wrong one.
     driverUsername: String(raw.driverUsername || "").trim(),
     driverName: String(raw.driverName || "").trim(),
+    // The run this bus is on. An office watching a moving marker needs to know
+    // where it is heading as much as where it is — "Thrissur, 40 km/h" answers
+    // half the question a dispatcher is actually asking.
+    fromPlace: String(raw.fromPlace || "").trim(),
+    toPlace: String(raw.toPlace || "").trim(),
     // Worked out once when the fix was reported, so the portals never have to
     // geocode and never disagree about where a bus is.
     placeName: raw.placeName ?? "",
@@ -77,6 +82,8 @@ function withFreshness(fix) {
     heading: fix.heading,
     driverUsername: fix.driverUsername,
     driverName: fix.driverName,
+    fromPlace: fix.fromPlace,
+    toPlace: fix.toPlace,
     placeName,
     // The one string a client should show for "where".
     place: placeName || "",
@@ -124,7 +131,8 @@ router.get("/config", (req, res) => {
 // vehicle id can currently place that bus anywhere.
 router.post("/vehicles/:id", async (req, res) => {
   const vehicleId = Number(req.params.id);
-  const { lat, lng, speedKph, heading, driverUsername, driverName } = req.body;
+  const { lat, lng, speedKph, heading, driverUsername, driverName, fromPlace, toPlace } =
+    req.body;
 
   if (!Number.isFinite(vehicleId)) {
     return res.status(400).json({ error: "A numeric vehicle id is required" });
@@ -151,6 +159,8 @@ router.post("/vehicles/:id", async (req, res) => {
     heading: Number(heading ?? 0),
     driverUsername: String(driverUsername || "").trim(),
     driverName: String(driverName || "").trim(),
+    fromPlace: String(fromPlace || "").trim(),
+    toPlace: String(toPlace || "").trim(),
     placeName: "",
     reportedAt: new Date().toISOString()
   };

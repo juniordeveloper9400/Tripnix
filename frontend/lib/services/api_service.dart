@@ -189,6 +189,8 @@ class ApiService {
     required double lng,
     String driverUsername = '',
     String driverName = '',
+    String fromPlace = '',
+    String toPlace = '',
     double speedKph = 0,
     double heading = 0,
   }) async {
@@ -203,6 +205,8 @@ class ApiService {
           'heading': heading,
           'driverUsername': driverUsername,
           'driverName': driverName,
+          'fromPlace': fromPlace,
+          'toPlace': toPlace,
         }),
       ),
     );

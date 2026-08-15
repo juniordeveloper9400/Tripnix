@@ -23,6 +23,20 @@ export function placeOf(location) {
   return String(location.place || location.placeName || location.label || '').trim();
 }
 
+/// The run a bus is on — "Thrissur → Kochi" — or '' when the driver gave none.
+///
+/// Where a bus is answers half of what a dispatcher asks; where it is going
+/// answers the rest.
+export function routeOf(location) {
+  if (!location) return '';
+  const from = String(location.fromPlace || '').trim();
+  const to = String(location.toPlace || '').trim();
+  if (!from && !to) return '';
+  if (!from) return `To ${to}`;
+  if (!to) return `From ${from}`;
+  return `${from} → ${to}`;
+}
+
 /// Loads Leaflet once per page — the keyless path to a real, interactive map
 /// with a marker per bus.
 ///
@@ -65,12 +79,14 @@ function loadLeaflet() {
 function busDivIcon(L, v, colour, sample) {
   return L.divIcon({
     className: 'fmap-pin-wrap',
-    iconSize: [40, 52],
-    iconAnchor: [20, 46],
-    popupAnchor: [0, -44],
+    iconSize: [40, 54],
+    // Anchored at the arrow's centre rather than a pin's tip: this marker points
+    // from where the bus is, it does not hang above it.
+    iconAnchor: [20, 20],
+    popupAnchor: [0, -20],
     html: `
       <div class="fmap-pin${sample ? ' is-sample' : ''}">
-        <img src="${busIcon(colour)}" alt="" width="34" height="43">
+        <img src="${busIcon(colour, v.location?.heading)}" alt="" width="38" height="38">
         <span>${esc(v.subtitle || v.name)}</span>
       </div>`
   });
@@ -130,10 +146,13 @@ async function renderLeafletMap(container, t, placed, { noteEl, compact, sample 
     bounds.push([l.lat, l.lng]);
 
     const place = placeOf(l);
+    const route = routeOf(l);
     const popup = `
       <strong>${esc(v.name)}</strong><br>
       ${esc(v.subtitle || '')} · ${l.live ? 'Live now' : l.ageMinutes + ' min ago'}<br>
       <small>${place ? esc(place) : 'Place name not available'}</small>
+      ${l.driverName ? '<br><small>Driver: ' + esc(l.driverName) + '</small>' : ''}
+      ${route ? '<br><small>' + esc(route) + '</small>' : ''}
       ${l.speedKph ? '<br>' + Math.round(l.speedKph) + ' km/h' : ''}
       ${sample ? '<br><em>Sample position</em>' : ''}`;
 
@@ -298,18 +317,23 @@ function loadGoogleMaps(apiKey) {
 
 /// The marker, as an SVG data URI so Google Maps can use it as an icon.
 ///
-/// A bus, because the bus is the subject: an office dispatches vehicles, and
-/// the marker should say which one is where.
-function busIcon(colour) {
+/// The marker: a navigation arrow, the way a map shows something moving.
+///
+/// Rotated to the fix's heading so the arrow points where the bus is actually
+/// travelling — on a road running two ways that is the difference between a bus
+/// on its way out and the same bus on its way back, which a round badge could
+/// never show. A bus with no heading (parked, or a device with no compass)
+/// points north rather than spinning on noise.
+function busIcon(colour, heading = 0) {
+  const angle = Number.isFinite(heading) ? heading : 0;
   const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="44" height="56" viewBox="0 0 44 56">
-      <path d="M22,54 L13,38 h18 z" fill="${colour}"/>
-      <circle cx="22" cy="21" r="18" fill="${colour}" stroke="#0b1220" stroke-width="2.5"/>
-      <rect x="13" y="11" width="18" height="16" rx="3" fill="#ffffff"/>
-      <rect x="15.2" y="13" width="13.6" height="6" rx="1.4" fill="${colour}"/>
-      <rect x="15.2" y="20.6" width="13.6" height="2" rx="0.9" fill="${colour}" opacity="0.45"/>
-      <circle cx="17" cy="28.4" r="2.3" fill="#0b1220"/>
-      <circle cx="27" cy="28.4" r="2.3" fill="#0b1220"/>
+    <svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 44 44">
+      <g transform="rotate(${angle} 22 22)">
+        <circle cx="22" cy="22" r="15" fill="#ffffff" opacity="0.92"/>
+        <circle cx="22" cy="22" r="15" fill="none" stroke="${colour}" stroke-width="2.5"/>
+        <path d="M22 10 L30.5 30 L22 25 L13.5 30 Z" fill="${colour}"
+              stroke="#0b1220" stroke-width="0.9" stroke-linejoin="round"/>
+      </g>
     </svg>`;
   return 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg.trim());
 }
@@ -722,19 +746,28 @@ async function renderGoogleMap(container, t, placed, { noteEl, compact, apiKey }
       // Moved rather than replaced, so a bus that reports again slides to its
       // new position instead of the whole layer blinking.
       marker.setPosition(position);
-      marker.setIcon({ url: busIcon(colour), scaledSize: new maps.Size(34, 43), anchor: new maps.Point(17, 43) });
+      marker.setIcon({
+        url: busIcon(colour, l.heading),
+        scaledSize: new maps.Size(38, 38),
+        anchor: new maps.Point(19, 19)
+      });
     } else {
       marker = new maps.Marker({
         map: live.map,
         position,
         title: `${v.name} · ${detail.replace(/<[^>]*>/g, '')}`,
-        icon: { url: busIcon(colour), scaledSize: new maps.Size(34, 43), anchor: new maps.Point(17, 43) },
+        icon: {
+          url: busIcon(colour, l.heading),
+          scaledSize: new maps.Size(38, 38),
+          anchor: new maps.Point(19, 19)
+        },
         zIndex: l.live ? 2 : 1
       });
       live.markers.set(v.id, marker);
     }
 
     marker.addListener('click', () => {
+      const route = routeOf(l);
       live.info.setContent(
         `<div style="font-family:system-ui;color:#0b1220;min-width:150px">
            <strong style="font-size:13px">${esc(v.name)}</strong><br>
@@ -742,6 +775,13 @@ async function renderGoogleMap(container, t, placed, { noteEl, compact, apiKey }
            <span style="font-size:10.5px;color:#64748b">${
              place ? esc(place) : 'Place name not available'
            }</span>
+           ${l.driverName
+             ? '<br><span style="font-size:10.5px;color:#64748b">Driver: ' +
+               esc(l.driverName) + '</span>'
+             : ''}
+           ${route
+             ? '<br><span style="font-size:10.5px;color:#64748b">' + esc(route) + '</span>'
+             : ''}
          </div>`
       );
       live.info.open({ map: live.map, anchor: marker });

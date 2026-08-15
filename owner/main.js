@@ -1,4 +1,4 @@
-import { renderFleetMap, renderBusMiniMap, fleetForDisplay, placeOf } from '../shared/fleet-map.js';
+import { renderFleetMap, renderBusMiniMap, fleetForDisplay, placeOf, routeOf } from '../shared/fleet-map.js';
 
 const API_BASE = window.location.origin.includes('3006')
   ? 'http://localhost:3000/api'
@@ -1052,11 +1052,15 @@ function renderTracking() {
           : `${place ? escapeHtml(place) : 'Position received, place name not available'}` +
             `${l.speedKph ? ' · ' + Math.round(l.speedKph) + ' km/h' : ''}`;
 
-        // Who is on the bus. The bus is the subject of the row, so the driver
-        // sits under it rather than replacing it as the heading.
-        const driver = l?.driverName
-          ? `<span class="row-sub">Driver: ${escapeHtml(l.driverName)}</span>`
-          : '';
+        // Who is on the bus and where the run goes. The bus is the subject of
+        // the row, so these sit under it rather than replacing it as the
+        // heading.
+        const route = routeOf(l);
+        const detail = [
+          l?.driverName ? 'Driver: ' + escapeHtml(l.driverName) : '',
+          route ? escapeHtml(route) : ''
+        ].filter(Boolean).join(' · ');
+        const driver = detail ? `<span class="row-sub">${detail}</span>` : '';
 
         const link = l
           ? `<a class="map-link" href="https://www.google.com/maps?q=${l.lat},${l.lng}" target="_blank" rel="noopener">Open map ↗</a>`
